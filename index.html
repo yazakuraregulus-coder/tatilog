@@ -38,6 +38,7 @@
   .pref-h { margin:10px 0 4px; font-size:13px; color:var(--main); font-weight:700; }
   .muni { font-size:14px; padding:3px 0; display:flex; justify-content:space-between; border-bottom:1px dotted #ddd; }
   .muni span { color:var(--muted); font-size:12px; }
+  .backup-info { font-size:11px; color:var(--muted); margin-top:4px; }
   .reset { margin-top:12px; background:none; color:#b33; font-size:12px; padding:4px; }
   #toast { position:fixed; left:50%; top:40%; transform:translate(-50%,-50%) scale(.8); opacity:0;
     background:rgba(0,0,0,.85); color:#fff; padding:18px 24px; border-radius:14px; text-align:center;
@@ -72,6 +73,12 @@
 <details id="list">
   <summary>訪問済み市町村：<span id="count">0</span></summary>
   <div id="visited"></div>
+  <div class="row">
+    <button id="export">💾 ファイルに保存</button>
+    <button id="import">📂 読み込む</button>
+  </div>
+  <input type="file" id="importFile" hidden>
+  <div class="backup-info" id="backupInfo"></div>
   <button class="reset" id="reset">記録をすべて消す</button>
 </details>
 <div id="toast"></div>
@@ -88,6 +95,7 @@ const MAX_ACC_M = 200;     // GPS精度がこれより悪いときはチェッ�
 const RETRY_MS = 10000;    // 市町村の判定に失敗したときの再試行間隔（失敗が続くと倍々に延ばす）
 const RETRY_MAX_MS = 120000; // 再試行間隔の上限
 const STORE_KEY = 'tabilog-v1';
+const BACKUP_KEY = 'tabilog-last-backup'; // 最後にファイルへ保存した日
 
 // ===== 保存データ =====
 let state = load();
@@ -245,7 +253,7 @@ $('checkin').addEventListener('click', () => {
   state.xp += gain;
   save();
   const after = levelOf(state.xp);
-  toast(`${title}<br>${m.city}<div class="big">+${gain} XP</div>` +
+  toast(`${title}<br>${esc(m.city)}<div class="big">+${gain} XP</div>` +
         (after > before ? `<div>⬆ レベルアップ！ Lv${after}</div>` : '') +
         (demo ? '<div style="font-size:12px;opacity:.8">テストモードのため保存されません</div>' : ''));
   render();
@@ -288,10 +296,70 @@ function render() {
   const byPref = {};
   list.forEach(v => (byPref[v.pref] = byPref[v.pref] || []).push(v));
   $('visited').innerHTML = Object.keys(byPref).sort().map(p =>
-    `<div class="pref-h">${p}（${byPref[p].length}）</div>` +
+    `<div class="pref-h">${esc(p)}（${byPref[p].length}）</div>` +
     byPref[p].sort((a, b) => a.first < b.first ? 1 : -1)
-      .map(v => `<div class="muni">${v.city}<span>${v.first}〜 ${v.count}回</span></div>`).join('')
+      .map(v => `<div class="muni">${esc(v.city)}<span>${esc(v.first)}〜 ${v.count}回</span></div>`).join('')
   ).join('') || '<div class="muni">まだありません</div>';
+}
+
+// HTMLに埋め込む文字のエスケープ（読み込んだファイルやOSMの名前に記号が入っていても安全にする）
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ===== バックアップ（ファイルへ保存／ファイルから読み込み） =====
+function renderBackupInfo() {
+  let d = null;
+  try { d = localStorage.getItem(BACKUP_KEY); } catch (e) {}
+  $('backupInfo').textContent = d ? `最後にファイルへ保存した日：${d}` : 'まだ一度もファイルへ保存していません';
+}
+
+$('export').addEventListener('click', () => {
+  const real = demo ? realState : state; // テストモード中でも本物の記録を保存する
+  const data = { app: 'tabilog', version: 1, exported: today(), xp: real.xp, visited: real.visited };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `tabilog-${today()}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  try { localStorage.setItem(BACKUP_KEY, today()); } catch (e) {}
+  renderBackupInfo();
+  toast('💾 保存しました<div style="font-size:12px;margin-top:4px">「ダウンロード」フォルダに<br>' + esc(a.download) + '</div>');
+});
+
+$('import').addEventListener('click', () => {
+  if (demo) { alert('テストモード中は読み込めません。テストを終了してから操作してください。'); return; }
+  $('importFile').value = '';
+  $('importFile').click();
+});
+
+$('importFile').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  let data;
+  try { data = parseBackup(await f.text()); }
+  catch (err) { alert('読み込めませんでした：' + err.message); return; }
+  const n = Object.keys(data.visited).length, nowN = Object.keys(state.visited).length;
+  if (!confirm(`ファイルの記録（${data.xp} XP・${n}市町村）で、今の記録（${state.xp} XP・${nowN}市町村）を置き換えます。よろしいですか？`)) return;
+  state = data; save(); render();
+  toast('📂 記録を読み込みました');
+});
+
+// バックアップファイルの中身を確かめて、記録の形に整える（おかしければ例外）
+function parseBackup(text) {
+  let j;
+  try { j = JSON.parse(text); } catch (e) { throw new Error('たびログの記録ファイルではありません'); }
+  if (!j || typeof j.xp !== 'number' || !(j.xp >= 0) || typeof j.visited !== 'object' || j.visited === null) {
+    throw new Error('たびログの記録ファイルではありません');
+  }
+  const visited = {};
+  for (const v of Object.values(j.visited)) {
+    const ok = v && ['pref', 'city', 'first', 'last'].every(f => typeof v[f] === 'string') && typeof v.count === 'number';
+    if (!ok) throw new Error('記録の形式が正しくありません');
+    visited[v.pref + '/' + v.city] = { pref: v.pref, city: v.city, first: v.first, last: v.last, count: v.count };
+  }
+  return { xp: Math.floor(j.xp), visited };
 }
 
 let toastTimer;
@@ -327,6 +395,7 @@ $('reset').addEventListener('click', () => {
 });
 
 render();
+renderBackupInfo();
 startWatch();
 </script>
 </body>
