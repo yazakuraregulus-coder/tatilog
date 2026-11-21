@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1e6f5c">
+<meta name="mobile-web-app-capable" content="yes">
+<title>たびログ（試作）</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --main:#1e6f5c; --accent:#f0a500; --bg:#f4f6f5; --text:#222; --muted:#6b7570; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; }
+  body { display:flex; flex-direction:column; }
+  header { background:var(--main); color:#fff; padding:10px 14px calc(10px) ; padding-top:calc(10px + env(safe-area-inset-top)); }
+  .hrow { display:flex; justify-content:space-between; align-items:baseline; }
+  .title { font-weight:700; font-size:17px; }
+  .lv { font-size:15px; } .lv b { font-size:22px; }
+  .bar { height:8px; background:rgba(255,255,255,.25); border-radius:4px; margin-top:6px; overflow:hidden; }
+  .bar > div { height:100%; background:var(--accent); width:0; transition:width .6s; }
+  .xptext { font-size:11px; opacity:.85; margin-top:3px; text-align:right; }
+  #map { flex:1; min-height:240px; }
+  .panel { background:#fff; padding:12px 14px; box-shadow:0 -2px 8px rgba(0,0,0,.08); z-index:500; }
+  #place { font-size:22px; font-weight:700; }
+  #pref { font-size:13px; color:var(--muted); }
+  .status { display:inline-block; font-size:12px; padding:2px 8px; border-radius:10px; margin-left:6px; vertical-align:middle; }
+  .new { background:#ffe9b3; color:#8a5a00; } .old { background:#e3efe9; color:var(--main); }
+  #sub { font-size:12px; color:var(--muted); margin:4px 0 10px; min-height:1em; }
+  button { font:inherit; border:none; border-radius:10px; padding:12px; cursor:pointer; }
+  #checkin { width:100%; background:var(--accent); color:#fff; font-size:18px; font-weight:700; }
+  #checkin:disabled { background:#c9cfcc; }
+  .row { display:flex; gap:8px; margin-top:8px; }
+  .row button { flex:1; background:#e3efe9; color:var(--main); font-size:14px; }
+  .row button.on { background:#d33; color:#fff; }
+  details { background:#fff; border-top:1px solid #e5e5e5; padding:10px 14px calc(10px + env(safe-area-inset-bottom)); max-height:40vh; overflow:auto; }
+  summary { font-weight:700; cursor:pointer; }
+  .pref-h { margin:10px 0 4px; font-size:13px; color:var(--main); font-weight:700; }
+  .muni { font-size:14px; padding:3px 0; display:flex; justify-content:space-between; border-bottom:1px dotted #ddd; }
+  .muni span { color:var(--muted); font-size:12px; }
+  .reset { margin-top:12px; background:none; color:#b33; font-size:12px; padding:4px; }
+  #toast { position:fixed; left:50%; top:40%; transform:translate(-50%,-50%) scale(.8); opacity:0;
+    background:rgba(0,0,0,.85); color:#fff; padding:18px 24px; border-radius:14px; text-align:center;
+    z-index:2000; pointer-events:none; transition:all .25s; min-width:200px; }
+  #toast.show { opacity:1; transform:translate(-50%,-50%) scale(1); }
+  #toast .big { font-size:26px; font-weight:700; color:var(--accent); }
+  .demo-banner { display:none; background:#d33; color:#fff; font-size:12px; text-align:center; padding:4px; }
+  body.demo .demo-banner { display:block; }
+</style>
+</head>
+<body>
+<header>
+  <div class="hrow">
+    <div class="title">🗾 たびログ</div>
+    <div class="lv">Lv <b id="lv">1</b></div>
+  </div>
+  <div class="bar"><div id="barfill"></div></div>
+  <div class="xptext" id="xptext">0 XP</div>
+</header>
+<div class="demo-banner">テストモード：地図をタップした場所にいることにします（記録は保存されません）</div>
+<div id="map"></div>
+<section class="panel">
+  <div><span id="place">現在地を取得中…</span><span id="status"></span></div>
+  <div id="pref"></div>
+  <div id="sub"></div>
+  <button id="checkin" disabled>チェックイン</button>
+  <div class="row">
+    <button id="locate">📍 現在地を更新</button>
+    <button id="demo">🧪 テストモード</button>
+  </div>
+</section>
+<details id="list">
+  <summary>訪問済み市町村：<span id="count">0</span></summary>
+  <div id="visited"></div>
+  <button class="reset" id="reset">記録をすべて消す</button>
+</details>
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>var GSI = {};</script>
+<script src="https://maps.gsi.go.jp/js/muni.js"></script>
+<script>
+// ===== 設定 =====
+const XP_NEW = 100;      // 初めての市町村
+const XP_REVISIT = 10;   // 再訪（1日1回）
+const LOOKUP_MOVE_M = 150; // この距離以上動いたら市町村を調べ直す
+const MAX_ACC_M = 200;     // GPS精度がこれより悪いときはチェックインできない
+const RETRY_MS = 10000;    // 市町村の判定に失敗したときの再試行間隔（失敗が続くと倍々に延ばす）
+const RETRY_MAX_MS = 120000; // 再試行間隔の上限
+const STORE_KEY = 'tabilog-v1';
+
+// ===== 保存データ =====
+let state = load();
+function load() {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || { xp: 0, visited: {} }; }
+  catch (e) { return { xp: 0, visited: {} }; }
+}
+// テストモード中は保存しない
+function save() { if (demo) return; try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {} }
+
+// ===== レベル計算（Lv2=100, Lv3=300, Lv4=600 …） =====
+const needXp = L => 50 * (L - 1) * L;
+function levelOf(xp) { let L = 1; while (xp >= needXp(L + 1)) L++; return L; }
+
+// ===== 地図 =====
+const map = L.map('map', { zoomControl: false }).setView([35.681, 139.767], 13);
+L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
+  maxZoom: 18,
+  attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>'
+}).addTo(map);
+const marker = L.circleMarker([0, 0], { radius: 8, color: '#fff', weight: 3, fillColor: '#1e6f5c', fillOpacity: 1 });
+const accCircle = L.circle([0, 0], { radius: 0, color: '#1e6f5c', weight: 1, fillOpacity: 0.1 });
+
+// ===== 現在地 =====
+let current = null;      // { lat, lng, acc, muni }
+let lastLookup = null;   // 最後に市町村を調べた地点
+let lookupSeq = 0;
+let watchId = null;
+let demo = false;
+let realState = null;    // テストモード中に本物の記録を退避しておく場所
+let firstFix = true;
+let lookupPending = false; // 市町村を調べている最中か
+let retryTimer = null;
+let failCount = 0;
+
+const $ = id => document.getElementById(id);
+
+function startWatch() {
+  if (!window.isSecureContext) {
+    showPlace('HTTPSで開いてください', '', '位置情報は https:// のページでしか使えません。テストモードなら試せます。');
+    return;
+  }
+  if (!navigator.geolocation) { showPlace('位置情報に未対応', '', ''); return; }
+  stopWatch();
+  $('sub').textContent = 'GPSを探しています…';
+  watchId = navigator.geolocation.watchPosition(
+    p => setPosition(p.coords.latitude, p.coords.longitude, p.coords.accuracy),
+    err => {
+      const msg = err.code === 1
+        ? '位置情報の利用が許可されていません。Chromeのアドレスバー左のアイコン →「権限」から許可してください。'
+        : '位置情報を取得できませんでした（' + err.message + '）';
+      $('sub').textContent = msg;
+    },
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 }
+  );
+}
+function stopWatch() { if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; } }
+
+function setPosition(lat, lng, acc, force) {
+  const ll = L.latLng(lat, lng);
+  marker.setLatLng(ll).addTo(map);
+  accCircle.setLatLng(ll).setRadius(acc || 0).addTo(map);
+  if (firstFix || demo) { map.setView(ll, Math.max(map.getZoom(), 14)); firstFix = false; }
+  const prevMuni = current && current.muni;
+  current = { lat, lng, acc, muni: prevMuni };
+  $('sub').textContent = acc ? `GPS精度 約${Math.round(acc)}m` : 'テスト地点';
+  if (force || !lastLookup || ll.distanceTo(lastLookup) > LOOKUP_MOVE_M) {
+    lastLookup = ll;
+    lookup(lat, lng);
+  }
+  render(); // GPS精度が変わるとチェックインの可否も変わるので毎回更新
+}
+
+// ===== 市町村の判定（国土地理院 → だめならOpenStreetMap） =====
+async function lookup(lat, lng) {
+  const seq = ++lookupSeq;
+  clearTimeout(retryTimer);
+  lookupPending = true;
+  let muni = null;
+  try { muni = await lookupGsi(lat, lng); } catch (e) {}
+  if (!muni) { try { muni = await lookupOsm(lat, lng); } catch (e) {} }
+  if (seq !== lookupSeq) return; // 古い結果は捨てる
+  lookupPending = false;
+  current.muni = muni;
+  if (muni && muni.source === 'gsi') {
+    failCount = 0;
+  } else {
+    // 地理院で判定できなかったら、その場にいても少し待って自動で再試行する
+    const wait = Math.min(RETRY_MS * 2 ** failCount, RETRY_MAX_MS);
+    failCount++;
+    retryTimer = setTimeout(() => {
+      if (!current) return;
+      lastLookup = L.latLng(current.lat, current.lng);
+      lookup(current.lat, current.lng);
+    }, wait);
+  }
+  render();
+}
+
+async function lookupGsi(lat, lng) {
+  const r = await fetch(`https://mreversegeocoder.gsi.go.jp/reverse-geocoder/LonLatToAddress?lat=${lat}&lon=${lng}`);
+  const j = await r.json();
+  if (!j.results || !j.results.muniCd) return null;
+  const code = String(parseInt(j.results.muniCd, 10));
+  const entry = GSI.MUNI_ARRAY && GSI.MUNI_ARRAY[code];
+  if (!entry) return null;
+  const parts = entry.split(',');           // 例: "13,東京都,13104,新宿区"
+  const pref = parts[1];
+  const names = parts[3].split(/[\s　]+/).filter(Boolean); // 例: ["札幌市","中央区"] / ["石狩郡","当別町"]
+  let city = names.join(''), ward = '';
+  if (names.length >= 2) {
+    if (/郡$/.test(names[0])) city = names[names.length - 1];          // 郡は省いて町村名だけ
+    else if (/市$/.test(names[0]) && /区$/.test(names[1])) { city = names[0]; ward = names[1]; } // 政令市は市単位
+  }
+  return { pref, city, ward, area: j.results.lv01Nm || '', source: 'gsi' };
+}
+
+async function lookupOsm(lat, lng) {
+  const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=10&accept-language=ja`);
+  const j = await r.json();
+  const a = j.address || {};
+  const pref = a.province || a.state || '';
+  const city = a.city || a.town || a.village || a.municipality || '';
+  if (!pref || !city) return null;
+  // 地理院と名前の付け方が違うことがあり二重登録の原因になるので、表示専用にする
+  return { pref, city, ward: a.city_district || '', area: '', source: 'osm' };
+}
+
+// ===== チェックイン =====
+const today = () => new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD
+const keyOf = m => m.pref + '/' + m.city;
+
+// チェックインできない理由（できるなら null）
+function checkinBlock() {
+  if (!current || !current.muni) return 'チェックイン';
+  const m = current.muni, v = state.visited[keyOf(m)];
+  if (m.source !== 'gsi') return '予備の判定中のためチェックイン不可';
+  if (!demo && current.acc > MAX_ACC_M) return `GPS精度が低いです（${MAX_ACC_M}m以内で可能）`;
+  if (v && v.last === today()) return '今日はチェックイン済み';
+  return null;
+}
+
+$('checkin').addEventListener('click', () => {
+  if (checkinBlock()) return;
+  const m = current.muni, k = keyOf(m), v = state.visited[k];
+  let gain, title;
+  if (!v) {
+    gain = XP_NEW; title = '🎉 初訪問！';
+    state.visited[k] = { pref: m.pref, city: m.city, first: today(), last: today(), count: 1 };
+  } else {
+    gain = XP_REVISIT; title = 'おかえりなさい';
+    v.last = today(); v.count++;
+  }
+  const before = levelOf(state.xp);
+  state.xp += gain;
+  save();
+  const after = levelOf(state.xp);
+  toast(`${title}<br>${m.city}<div class="big">+${gain} XP</div>` +
+        (after > before ? `<div>⬆ レベルアップ！ Lv${after}</div>` : '') +
+        (demo ? '<div style="font-size:12px;opacity:.8">テストモードのため保存されません</div>' : ''));
+  render();
+});
+
+// ===== 画面更新 =====
+function showPlace(name, pref, sub) {
+  $('place').textContent = name; $('pref').textContent = pref; $('status').innerHTML = '';
+  if (sub !== undefined) $('sub').textContent = sub;
+}
+
+function render() {
+  // レベル
+  const L = levelOf(state.xp), lo = needXp(L), hi = needXp(L + 1);
+  $('lv').textContent = L;
+  $('barfill').style.width = ((state.xp - lo) / (hi - lo) * 100) + '%';
+  $('xptext').textContent = `${state.xp} XP（次のレベルまで ${hi - state.xp}）`;
+
+  // 現在地
+  const btn = $('checkin');
+  if (current && current.muni) {
+    const m = current.muni, v = state.visited[keyOf(m)];
+    $('place').textContent = m.city;
+    $('pref').textContent = [m.pref, m.ward, m.area].filter(Boolean).join(' ');
+    $('status').innerHTML = v
+      ? `<span class="status old">訪問済み ${v.count}回</span>`
+      : '<span class="status new">未訪問！</span>';
+    const block = checkinBlock();
+    btn.disabled = !!block;
+    btn.textContent = block || `チェックイン +${v ? XP_REVISIT : XP_NEW} XP`;
+  } else if (current) {
+    if (lookupPending) showPlace('市町村を調べています…', '');
+    else showPlace('市町村が判定できません', '海上・通信エラーなど（自動で再試行します）');
+    btn.disabled = true; btn.textContent = 'チェックイン';
+  }
+
+  // 訪問済み一覧
+  const list = Object.values(state.visited);
+  $('count').textContent = list.length;
+  const byPref = {};
+  list.forEach(v => (byPref[v.pref] = byPref[v.pref] || []).push(v));
+  $('visited').innerHTML = Object.keys(byPref).sort().map(p =>
+    `<div class="pref-h">${p}（${byPref[p].length}）</div>` +
+    byPref[p].sort((a, b) => a.first < b.first ? 1 : -1)
+      .map(v => `<div class="muni">${v.city}<span>${v.first}〜 ${v.count}回</span></div>`).join('')
+  ).join('') || '<div class="muni">まだありません</div>';
+}
+
+let toastTimer;
+function toast(html) {
+  const t = $('toast'); t.innerHTML = html; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ===== ボタン類 =====
+$('locate').addEventListener('click', () => {
+  if (demo) toggleDemo();
+  firstFix = true; lastLookup = null; startWatch();
+});
+function toggleDemo() {
+  demo = !demo;
+  // テスト中は記録のコピーで遊び、終わったら本物の記録に戻す
+  if (demo) { realState = state; state = JSON.parse(JSON.stringify(state)); }
+  else { state = realState; realState = null; }
+  render();
+  document.body.classList.toggle('demo', demo);
+  $('demo').classList.toggle('on', demo);
+  $('demo').textContent = demo ? '🧪 テスト終了' : '🧪 テストモード';
+  if (demo) { stopWatch(); $('sub').textContent = '地図をタップしてください'; }
+  else startWatch();
+  setTimeout(() => map.invalidateSize(), 50);
+}
+$('demo').addEventListener('click', toggleDemo);
+map.on('click', e => { if (demo) setPosition(e.latlng.lat, e.latlng.lng, 0, true); });
+$('reset').addEventListener('click', () => {
+  if (confirm('経験値と訪問記録をすべて消します。よろしいですか？')) {
+    state = { xp: 0, visited: {} }; save(); render();
+  }
+});
+
+render();
+startWatch();
+</script>
+</body>
+</html>
