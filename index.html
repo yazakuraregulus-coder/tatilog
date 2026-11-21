@@ -38,6 +38,15 @@
   .pref-h { margin:10px 0 4px; font-size:13px; color:var(--main); font-weight:700; }
   .muni { font-size:14px; padding:3px 0; display:flex; justify-content:space-between; border-bottom:1px dotted #ddd; }
   .muni span { color:var(--muted); font-size:12px; }
+  .spot { margin-top:10px; padding:10px; border:2px solid #7b4fc9; border-radius:12px; background:#f5f0fd; }
+  .spot[hidden] { display:none; }
+  .spot-name { font-size:17px; font-weight:700; color:#5a32a3; }
+  .spot-sub { font-size:12px; color:var(--muted); margin:2px 0 8px; }
+  .spot .status.new { background:#e6dbfa; color:#5a32a3; }
+  #spotCheckin { width:100%; background:#7b4fc9; color:#fff; font-size:16px; font-weight:700; }
+  #spotCheckin:disabled { background:#c9cfcc; }
+  .spot-hint { font-size:12px; color:#5a32a3; margin-top:8px; min-height:1em; }
+  .list-h { margin:14px 0 2px; font-size:14px; font-weight:700; }
   .backup-info { font-size:11px; color:var(--muted); margin-top:4px; }
   .reset { margin-top:12px; background:none; color:#b33; font-size:12px; padding:4px; }
   #toast { position:fixed; left:50%; top:40%; transform:translate(-50%,-50%) scale(.8); opacity:0;
@@ -65,14 +74,21 @@
   <div id="pref"></div>
   <div id="sub"></div>
   <button id="checkin" disabled>チェックイン</button>
+  <div id="spotBox" class="spot" hidden>
+    <div><span id="spotName" class="spot-name"></span><span id="spotStatus"></span></div>
+    <div id="spotSub" class="spot-sub"></div>
+    <button id="spotCheckin">観光地チェックイン</button>
+  </div>
+  <div id="spotHint" class="spot-hint"></div>
   <div class="row">
     <button id="locate">📍 現在地を更新</button>
     <button id="demo">🧪 テストモード</button>
   </div>
 </section>
 <details id="list">
-  <summary>訪問済み市町村：<span id="count">0</span></summary>
+  <summary>訪問済み 市町村：<span id="count">0</span> ／ 観光地：<span id="spotCount">0</span></summary>
   <div id="visited"></div>
+  <div id="spotList"></div>
   <div class="row">
     <button id="export">💾 ファイルに保存</button>
     <button id="import">📂 読み込む</button>
@@ -96,12 +112,103 @@ const RETRY_MS = 10000;    // 市町村の判定に失敗したときの再試�
 const RETRY_MAX_MS = 120000; // 再試行間隔の上限
 const STORE_KEY = 'tabilog-v1';
 const BACKUP_KEY = 'tabilog-last-backup'; // 最後にファイルへ保存した日
+const XP_SPOT_NEW = 50;      // 初めての観光地
+const XP_SPOT_REVISIT = 5;   // 観光地の再訪（1日1回）
+const SPOT_RADIUS_M = 200;   // 観光地からこの距離以内ならチェックインできる
+const SPOT_HINT_M = 10000;   // この距離以内の観光地は「近くの観光地」として案内する
+
+// ===== 観光地リスト =====
+// 追加するときは同じ形で1行足す。id は英数字とハイフンで、一度決めたら変えない（記録のキーになる）
+const SPOTS = [
+  { id: 'sapporo-clock-tower', name: '札幌市時計台', pref: '北海道', lat: 43.0625, lng: 141.3536 },
+  { id: 'hakodate-yama', name: '函館山', pref: '北海道', lat: 41.7593, lng: 140.7043 },
+  { id: 'chusonji', name: '中尊寺', pref: '岩手県', lat: 39.0011, lng: 141.1003 },
+  { id: 'zuiganji', name: '瑞巌寺（松島）', pref: '宮城県', lat: 38.3719, lng: 141.0597 },
+  { id: 'nikko-toshogu', name: '日光東照宮', pref: '栃木県', lat: 36.7581, lng: 139.5988 },
+  { id: 'tokyo-tower', name: '東京タワー', pref: '東京都', lat: 35.6586, lng: 139.7454 },
+  { id: 'tokyo-skytree', name: '東京スカイツリー', pref: '東京都', lat: 35.7101, lng: 139.8107 },
+  { id: 'sensoji', name: '浅草寺', pref: '東京都', lat: 35.7148, lng: 139.7967 },
+  { id: 'meiji-jingu', name: '明治神宮', pref: '東京都', lat: 35.6764, lng: 139.6993 },
+  { id: 'kamakura-daibutsu', name: '鎌倉大仏（高徳院）', pref: '神奈川県', lat: 35.3169, lng: 139.5359 },
+  { id: 'yokohama-chinatown', name: '横浜中華街', pref: '神奈川県', lat: 35.4437, lng: 139.6465 },
+  { id: 'fuji-hongu-sengen', name: '富士山本宮浅間大社', pref: '静岡県', lat: 35.2273, lng: 138.6100 },
+  { id: 'zenkoji', name: '善光寺', pref: '長野県', lat: 36.6614, lng: 138.1878 },
+  { id: 'kenrokuen', name: '兼六園', pref: '石川県', lat: 36.5621, lng: 136.6627 },
+  { id: 'shirakawago', name: '白川郷', pref: '岐阜県', lat: 36.2577, lng: 136.9064 },
+  { id: 'nagoya-castle', name: '名古屋城', pref: '愛知県', lat: 35.1856, lng: 136.8991 },
+  { id: 'ise-naiku', name: '伊勢神宮 内宮', pref: '三重県', lat: 34.4551, lng: 136.7254 },
+  { id: 'kinkakuji', name: '金閣寺', pref: '京都府', lat: 35.0394, lng: 135.7292 },
+  { id: 'kiyomizudera', name: '清水寺', pref: '京都府', lat: 34.9949, lng: 135.7850 },
+  { id: 'fushimi-inari', name: '伏見稲荷大社', pref: '京都府', lat: 34.9671, lng: 135.7727 },
+  { id: 'todaiji', name: '東大寺', pref: '奈良県', lat: 34.6890, lng: 135.8398 },
+  { id: 'osaka-castle', name: '大阪城', pref: '大阪府', lat: 34.6873, lng: 135.5262 },
+  { id: 'tsutenkaku', name: '通天閣', pref: '大阪府', lat: 34.6525, lng: 135.5063 },
+  { id: 'himeji-castle', name: '姫路城', pref: '兵庫県', lat: 34.8394, lng: 134.6939 },
+  { id: 'izumo-taisha', name: '出雲大社', pref: '島根県', lat: 35.4020, lng: 132.6857 },
+  { id: 'okayama-korakuen', name: '岡山後楽園', pref: '岡山県', lat: 34.6663, lng: 133.9374 },
+  { id: 'itsukushima-jinja', name: '厳島神社', pref: '広島県', lat: 34.2959, lng: 132.3199 },
+  { id: 'genbaku-dome', name: '原爆ドーム', pref: '広島県', lat: 34.3955, lng: 132.4536 },
+  { id: 'dogo-onsen', name: '道後温泉本館', pref: '愛媛県', lat: 33.8520, lng: 132.7863 },
+  { id: 'kotohiragu', name: '金刀比羅宮', pref: '香川県', lat: 34.1839, lng: 133.8091 },
+  { id: 'katsurahama', name: '桂浜', pref: '高知県', lat: 33.4970, lng: 133.5746 },
+  { id: 'dazaifu-tenmangu', name: '太宰府天満宮', pref: '福岡県', lat: 33.5215, lng: 130.5349 },
+  { id: 'kumamoto-castle', name: '熊本城', pref: '熊本県', lat: 32.8063, lng: 130.7059 },
+  { id: 'glover-garden', name: 'グラバー園', pref: '長崎県', lat: 32.7343, lng: 129.8692 },
+  { id: 'shurijo', name: '首里城', pref: '沖縄県', lat: 26.2170, lng: 127.7195 },
+  { id: 'churaumi', name: '沖縄美ら海水族館', pref: '沖縄県', lat: 26.6943, lng: 127.8779 },
+
+  // --- 群馬県（2026-11-21 追加。座標は OpenStreetMap / 国土地理院の地名検索で確認） ---
+  // 温泉
+  { id: 'kusatsu-yubatake', name: '湯畑（草津温泉）', pref: '群馬県', lat: 36.6229, lng: 138.5967 },
+  { id: 'kusatsu-sainokawara', name: '西の河原公園（草津温泉）', pref: '群馬県', lat: 36.6241, lng: 138.5904 },
+  { id: 'ikaho-ishidangai', name: '伊香保温泉 石段街', pref: '群馬県', lat: 36.4977, lng: 138.9164 },
+  { id: 'shima-sekizenkan', name: '四万温泉 積善館', pref: '群馬県', lat: 36.6863, lng: 138.7734 },
+  { id: 'hoshi-onsen', name: '法師温泉 長寿館', pref: '群馬県', lat: 36.7440, lng: 138.8305 },
+  { id: 'takaragawa-onsen', name: '宝川温泉 汪泉閣', pref: '群馬県', lat: 36.8478, lng: 139.0478 },
+  // 歴史・文化
+  { id: 'tomioka-silk-mill', name: '富岡製糸場', pref: '群馬県', lat: 36.2554, lng: 138.8876 },
+  { id: 'usui-megane-bashi', name: '碓氷第三橋梁（めがね橋）', pref: '群馬県', lat: 36.3580, lng: 138.6983 },
+  { id: 'kanayama-castle', name: '金山城跡', pref: '群馬県', lat: 36.3169, lng: 139.3778 },
+  { id: 'iwabitsu-castle', name: '岩櫃城跡', pref: '群馬県', lat: 36.5593, lng: 138.8045 },
+  { id: 'rinkokaku', name: '臨江閣', pref: '群馬県', lat: 36.3959, lng: 139.0622 },
+  { id: 'iwajuku-museum', name: '岩宿博物館', pref: '群馬県', lat: 36.3991, lng: 139.2857 },
+  // 神社・寺
+  { id: 'haruna-jinja', name: '榛名神社', pref: '群馬県', lat: 36.4584, lng: 138.8525 },
+  { id: 'myogi-jinja', name: '妙義神社', pref: '群馬県', lat: 36.3005, lng: 138.7626 },
+  { id: 'akagi-jinja', name: '赤城神社（赤城大沼）', pref: '群馬県', lat: 36.5527, lng: 139.1835 },
+  { id: 'serada-toshogu', name: '世良田東照宮', pref: '群馬県', lat: 36.2618, lng: 139.2754 },
+  { id: 'kiryu-tenmangu', name: '桐生天満宮', pref: '群馬県', lat: 36.4218, lng: 139.3462 },
+  { id: 'shorinzan-darumaji', name: '少林山達磨寺', pref: '群馬県', lat: 36.3299, lng: 138.9574 },
+  { id: 'mizusawa-kannon', name: '水澤観音（水澤寺）', pref: '群馬県', lat: 36.4794, lng: 138.9455 },
+  { id: 'morinji', name: '茂林寺', pref: '群馬県', lat: 36.2245, lng: 139.5312 },
+  { id: 'takasaki-kannon', name: '高崎白衣大観音', pref: '群馬県', lat: 36.3110, lng: 138.9806 },
+  // 自然
+  { id: 'fukiware-falls', name: '吹割の滝', pref: '群馬県', lat: 36.7021, lng: 139.2071 },
+  { id: 'hatomachi-toge', name: '鳩待峠（尾瀬）', pref: '群馬県', lat: 36.8903, lng: 139.2005 },
+  { id: 'onioshidashi', name: '鬼押出し園', pref: '群馬県', lat: 36.4438, lng: 138.5325 },
+  { id: 'takatsudo-kyo', name: '高津戸峡', pref: '群馬県', lat: 36.4376, lng: 139.2794 },
+  { id: 'tsutsujigaoka-park', name: 'つつじが岡公園', pref: '群馬県', lat: 36.2413, lng: 139.5451 },
+  { id: 'tambara-lavender', name: 'たんばらラベンダーパーク', pref: '群馬県', lat: 36.7795, lng: 139.0731 },
+  { id: 'gunma-flower-park', name: 'ぐんまフラワーパーク', pref: '群馬県', lat: 36.4560, lng: 139.1756 },
+  // 新しめの人気スポット
+  { id: 'gunma-pref-office', name: '群馬県庁', pref: '群馬県', lat: 36.3911, lng: 139.0607 },
+  { id: 'lockheart-castle', name: 'ロックハート城', pref: '群馬県', lat: 36.6320, lng: 138.9883 },
+  { id: 'yamba-dam', name: '八ッ場ダム', pref: '群馬県', lat: 36.5571, lng: 138.7146 },
+  { id: 'usui-railway-village', name: '碓氷峠鉄道文化むら', pref: '群馬県', lat: 36.3368, lng: 138.7325 },
+  { id: 'kawaba-denen-plaza', name: '道の駅 川場田園プラザ', pref: '群馬県', lat: 36.6867, lng: 139.1069 },
+  { id: 'gunma-safari-park', name: '群馬サファリパーク', pref: '群馬県', lat: 36.2258, lng: 138.8851 },
+  { id: 'gunma-natural-history', name: '群馬県立自然史博物館', pref: '群馬県', lat: 36.2697, lng: 138.8668 },
+];
+const spotById = id => SPOTS.find(s => s.id === id);
 
 // ===== 保存データ =====
 let state = load();
 function load() {
-  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || { xp: 0, visited: {} }; }
-  catch (e) { return { xp: 0, visited: {} }; }
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(STORE_KEY)); } catch (e) {}
+  s = s || { xp: 0, visited: {} };
+  s.spots = s.spots || {}; // 観光地の記録（古いデータには無いので補う）
+  return s;
 }
 // テストモード中は保存しない
 function save() { if (demo) return; try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {} }
@@ -119,6 +226,14 @@ L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
 const marker = L.circleMarker([0, 0], { radius: 8, color: '#fff', weight: 3, fillColor: '#1e6f5c', fillOpacity: 1 });
 const accCircle = L.circle([0, 0], { radius: 0, color: '#1e6f5c', weight: 1, fillOpacity: 0.1 });
 
+// 観光地の印（未訪問は紫、訪問済みは灰色）
+const spotMarkers = {};
+SPOTS.forEach(s => {
+  spotMarkers[s.id] = L.circleMarker([s.lat, s.lng], { radius: 7, color: '#fff', weight: 2, fillOpacity: 1 })
+    .bindTooltip(s.name, { direction: 'top', offset: [0, -6] })
+    .addTo(map);
+});
+
 // ===== 現在地 =====
 let current = null;      // { lat, lng, acc, muni }
 let lastLookup = null;   // 最後に市町村を調べた地点
@@ -132,6 +247,9 @@ let retryTimer = null;
 let failCount = 0;
 
 const $ = id => document.getElementById(id);
+
+// 観光地の案内が出たり消えたりして地図の高さが変わったら、地図を描き直す
+if (window.ResizeObserver) new ResizeObserver(() => map.invalidateSize()).observe($('map'));
 
 function startWatch() {
   if (!window.isSecureContext) {
@@ -259,6 +377,84 @@ $('checkin').addEventListener('click', () => {
   render();
 });
 
+// ===== 観光地チェックイン =====
+// 現在地からいちばん近い観光地と距離（m）
+function nearestSpot() {
+  if (!current) return null;
+  const here = L.latLng(current.lat, current.lng);
+  let best = null;
+  SPOTS.forEach(s => {
+    const d = here.distanceTo([s.lat, s.lng]);
+    if (!best || d < best.dist) best = { spot: s, dist: d };
+  });
+  return best;
+}
+
+// 観光地にチェックインできない理由（できるなら null）
+function spotBlock(n) {
+  if (!n || n.dist > SPOT_RADIUS_M) return '範囲外';
+  if (!demo && current.acc > MAX_ACC_M) return `GPS精度が低いです（${MAX_ACC_M}m以内で可能）`;
+  const v = state.spots[n.spot.id];
+  if (v && v.last === today()) return '今日はチェックイン済み';
+  return null;
+}
+
+$('spotCheckin').addEventListener('click', () => {
+  const n = nearestSpot();
+  if (spotBlock(n)) return;
+  const s = n.spot, v = state.spots[s.id];
+  let gain, title;
+  if (!v) {
+    gain = XP_SPOT_NEW; title = '📸 観光地に到着！';
+    state.spots[s.id] = { name: s.name, pref: s.pref, first: today(), last: today(), count: 1 };
+  } else {
+    gain = XP_SPOT_REVISIT; title = 'また来ました';
+    v.last = today(); v.count++;
+  }
+  const before = levelOf(state.xp);
+  state.xp += gain;
+  save();
+  const after = levelOf(state.xp);
+  toast(`${title}<br>${esc(s.name)}<div class="big">+${gain} XP</div>` +
+        (after > before ? `<div>⬆ レベルアップ！ Lv${after}</div>` : '') +
+        (demo ? '<div style="font-size:12px;opacity:.8">テストモードのため保存されません</div>' : ''));
+  render();
+});
+
+const fmtDist = m => m < 1000 ? `約${Math.round(m / 10) * 10}m` : `約${(m / 1000).toFixed(1)}km`;
+
+function renderSpots() {
+  // 地図の印の色
+  SPOTS.forEach(s => spotMarkers[s.id].setStyle({ fillColor: state.spots[s.id] ? '#9aa39f' : '#7b4fc9' }));
+
+  // 近くの観光地
+  const n = nearestSpot();
+  const box = $('spotBox'), hint = $('spotHint');
+  if (n && n.dist <= SPOT_RADIUS_M) {
+    const v = state.spots[n.spot.id], block = spotBlock(n);
+    box.hidden = false; hint.textContent = '';
+    $('spotName').textContent = n.spot.name;
+    $('spotStatus').innerHTML = v
+      ? `<span class="status old">訪問済み ${v.count}回</span>`
+      : '<span class="status new">未訪問！</span>';
+    $('spotSub').textContent = `観光地まで ${fmtDist(n.dist)}`;
+    $('spotCheckin').disabled = !!block;
+    $('spotCheckin').textContent = block || `観光地チェックイン +${v ? XP_SPOT_REVISIT : XP_SPOT_NEW} XP`;
+  } else {
+    box.hidden = true;
+    hint.textContent = n && n.dist <= SPOT_HINT_M
+      ? `🧭 近くの観光地：${n.spot.name}（${fmtDist(n.dist)}）` : '';
+  }
+
+  // 訪問済み観光地の一覧
+  const ids = Object.keys(state.spots);
+  $('spotCount').textContent = ids.length;
+  $('spotList').innerHTML = `<div class="list-h">観光地（${ids.length} / ${SPOTS.length}）</div>` +
+    (ids.map(id => state.spots[id]).sort((a, b) => a.first < b.first ? 1 : -1)
+      .map(v => `<div class="muni">${esc(v.name)}<span>${esc(v.first)}〜 ${v.count}回</span></div>`).join('')
+     || '<div class="muni">まだありません</div>');
+}
+
 // ===== 画面更新 =====
 function showPlace(name, pref, sub) {
   $('place').textContent = name; $('pref').textContent = pref; $('status').innerHTML = '';
@@ -295,11 +491,13 @@ function render() {
   $('count').textContent = list.length;
   const byPref = {};
   list.forEach(v => (byPref[v.pref] = byPref[v.pref] || []).push(v));
-  $('visited').innerHTML = Object.keys(byPref).sort().map(p =>
+  $('visited').innerHTML = `<div class="list-h">市町村（${list.length}）</div>` + Object.keys(byPref).sort().map(p =>
     `<div class="pref-h">${esc(p)}（${byPref[p].length}）</div>` +
     byPref[p].sort((a, b) => a.first < b.first ? 1 : -1)
       .map(v => `<div class="muni">${esc(v.city)}<span>${esc(v.first)}〜 ${v.count}回</span></div>`).join('')
-  ).join('') || '<div class="muni">まだありません</div>';
+  ).join('') + (list.length ? '' : '<div class="muni">まだありません</div>');
+
+  renderSpots();
 }
 
 // HTMLに埋め込む文字のエスケープ（読み込んだファイルやOSMの名前に記号が入っていても安全にする）
@@ -316,7 +514,7 @@ function renderBackupInfo() {
 
 $('export').addEventListener('click', () => {
   const real = demo ? realState : state; // テストモード中でも本物の記録を保存する
-  const data = { app: 'tabilog', version: 1, exported: today(), xp: real.xp, visited: real.visited };
+  const data = { app: 'tabilog', version: 1, exported: today(), xp: real.xp, visited: real.visited, spots: real.spots };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -340,8 +538,8 @@ $('importFile').addEventListener('change', async e => {
   let data;
   try { data = parseBackup(await f.text()); }
   catch (err) { alert('読み込めませんでした：' + err.message); return; }
-  const n = Object.keys(data.visited).length, nowN = Object.keys(state.visited).length;
-  if (!confirm(`ファイルの記録（${data.xp} XP・${n}市町村）で、今の記録（${state.xp} XP・${nowN}市町村）を置き換えます。よろしいですか？`)) return;
+  const desc = s => `${s.xp} XP・${Object.keys(s.visited).length}市町村・観光地${Object.keys(s.spots).length}か所`;
+  if (!confirm(`ファイルの記録（${desc(data)}）で、今の記録（${desc(state)}）を置き換えます。よろしいですか？`)) return;
   state = data; save(); render();
   toast('📂 記録を読み込みました');
 });
@@ -359,7 +557,17 @@ function parseBackup(text) {
     if (!ok) throw new Error('記録の形式が正しくありません');
     visited[v.pref + '/' + v.city] = { pref: v.pref, city: v.city, first: v.first, last: v.last, count: v.count };
   }
-  return { xp: Math.floor(j.xp), visited };
+  // 観光地の記録（観光地機能より前に保存したファイルには無い）
+  const spots = {};
+  if (j.spots !== undefined) {
+    if (typeof j.spots !== 'object' || j.spots === null) throw new Error('記録の形式が正しくありません');
+    for (const [id, v] of Object.entries(j.spots)) {
+      const ok = v && ['name', 'first', 'last'].every(f => typeof v[f] === 'string') && typeof v.count === 'number';
+      if (!ok) throw new Error('観光地の記録の形式が正しくありません');
+      spots[id] = { name: v.name, pref: typeof v.pref === 'string' ? v.pref : '', first: v.first, last: v.last, count: v.count };
+    }
+  }
+  return { xp: Math.floor(j.xp), visited, spots };
 }
 
 let toastTimer;
@@ -390,7 +598,7 @@ $('demo').addEventListener('click', toggleDemo);
 map.on('click', e => { if (demo) setPosition(e.latlng.lat, e.latlng.lng, 0, true); });
 $('reset').addEventListener('click', () => {
   if (confirm('経験値と訪問記録をすべて消します。よろしいですか？')) {
-    state = { xp: 0, visited: {} }; save(); render();
+    state = { xp: 0, visited: {}, spots: {} }; save(); render();
   }
 });
 
