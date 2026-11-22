@@ -86,6 +86,37 @@
   .memo textarea:disabled { background:var(--bg); }
   .memo-info { font-size:11px; color:var(--muted); min-height:1.2em; margin-top:2px; text-align:right; }
   .spot-item { cursor:pointer; }
+  /* 駅の案内カード */
+  .spot.st { border-color:#1F5FB0; background:#eef4fc; }
+  .spot.st .spot-name { color:#1F5FB0; }
+  .spot.st .status.new { background:#d6e4f7; color:#1F5FB0; }
+  #stCheckin { width:100%; background:#1F5FB0; color:#fff; font-size:16px; font-weight:700; }
+  #stCheckin:disabled { background:#c9cfcc; }
+  .st-lines { margin-top:2px; }
+  .line-chip { display:inline-flex; align-items:center; gap:3px; font-size:11px; margin:2px 6px 0 0; white-space:nowrap; }
+  .line-chip i { width:9px; height:9px; border-radius:50%; display:inline-block; }
+  /* 駅の表示ON/OFFボタン（地図の右上） */
+  .map-toggle { background:#fff; border:2px solid rgba(0,0,0,.2); border-radius:8px; padding:6px 10px;
+    font-size:13px; font-weight:700; color:#1F5FB0; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.2); }
+  .map-toggle.off { color:var(--muted); }
+  .map-toggle small { display:block; font-size:10px; font-weight:400; color:var(--muted); }
+  .st-pop { text-align:center; }
+  .st-pop b { display:block; font-size:14px; }
+  .st-pop span { font-size:11px; color:var(--muted); }
+  /* コンプリート一覧（県ごと・路線ごと） */
+  .comp { border-bottom:1px dotted #ddd; }
+  .comp summary { list-style:none; display:flex; align-items:center; gap:8px; padding:6px 0; font-weight:400; font-size:14px; }
+  .comp summary::-webkit-details-marker { display:none; }
+  .comp summary::before { content:'▸'; color:var(--muted); font-size:11px; }
+  .comp[open] summary::before { content:'▾'; }
+  .comp .c-name { flex:1; display:flex; align-items:center; gap:5px; }
+  .comp .c-num { font-size:12px; color:var(--muted); white-space:nowrap; }
+  .comp .c-num.done { color:var(--main); font-weight:700; }
+  .c-bar { width:70px; height:6px; background:#e5e9e7; border-radius:3px; overflow:hidden; flex:none; }
+  .c-bar > div { height:100%; background:#7b4fc9; }
+  .comp .muni { padding-left:16px; }
+  .comp .muni.todo { color:var(--muted); }
+  .list-note { font-size:11px; color:var(--muted); margin:2px 0 4px; }
   .list-h { margin:14px 0 2px; font-size:14px; font-weight:700; }
   .backup-info { font-size:11px; color:var(--muted); margin-top:4px; }
   .reset { margin-top:12px; background:none; color:#b33; font-size:12px; padding:4px; }
@@ -119,6 +150,12 @@
     <div id="spotSub" class="spot-sub"></div>
     <button id="spotCheckin">観光地チェックイン</button>
   </div>
+  <div id="stBox" class="spot st" hidden>
+    <div><span id="stName" class="spot-name"></span><span id="stStatus"></span></div>
+    <div id="stLines" class="st-lines"></div>
+    <div id="stSub" class="spot-sub"></div>
+    <button id="stCheckin">駅チェックイン</button>
+  </div>
   <div id="spotHint" class="spot-hint"></div>
   <div class="row">
     <button id="locate">📍 現在地を更新</button>
@@ -126,9 +163,10 @@
   </div>
 </section>
 <details id="list">
-  <summary>訪問済み 市町村：<span id="count">0</span> ／ 観光地：<span id="spotCount">0</span></summary>
+  <summary>訪問済み 市町村：<span id="count">0</span> ／ 観光地：<span id="spotCount">0</span> ／ 駅：<span id="stCount">0</span></summary>
   <div id="visited"></div>
   <div id="spotList"></div>
+  <div id="stationList"></div>
   <div class="row">
     <button id="export">💾 ファイルに保存</button>
     <button id="import">📂 読み込む</button>
@@ -186,6 +224,20 @@ const XP_SPOT_NEW = 50;      // 初めての観光地
 const XP_SPOT_REVISIT = 5;   // 観光地の再訪（1日1回）
 const SPOT_RADIUS_M = 200;   // 観光地からこの距離以内ならチェックインできる
 const SPOT_HINT_M = 10000;   // この距離以内の観光地は「近くの観光地」として案内する
+const XP_STATION_NEW = 20;      // 初めての駅
+const XP_STATION_REVISIT = 2;   // 駅の再訪（1日1回）
+const STATION_RADIUS_M = 150;   // 駅（ホーム）からこの距離以内ならチェックインできる
+const STATION_MIN_ZOOM = 13;    // ここまで拡大したときだけ地図に駅を表示する
+const STATIONS_URL = 'stations.json';            // 駅データ（必要になったときに読み込む）
+const SHOW_STATIONS_KEY = 'tabilog-show-stations'; // 駅の表示ON/OFF（この端末だけの設定）
+const MAX_SPEED_KMH = 10;       // 観光地・駅は、これより速く動いているとチェックインできない（電車での通過を防ぐ）
+const SPEED_WINDOW_MS = 5000;   // GPSが速度を返さないときは、この時間以上前の位置との差から速度を計算する
+const STILL_AFTER_MS = 6000;    // 位置の更新がこの時間なければ「止まっている」とみなす
+// 都道府県の並び順（一覧の表示用）
+const PREF_ORDER = ['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県',
+  '新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県',
+  '鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
+const prefRank = p => { const i = PREF_ORDER.indexOf(p); return i < 0 ? 99 : i; };
 
 // ===== 観光地リスト =====
 // 追加するときは同じ形で1行足す。id は英数字とハイフンで、一度決めたら変えない（記録のキーになる）
@@ -460,10 +512,12 @@ function load() {
   try { s = JSON.parse(localStorage.getItem(STORE_KEY)); } catch (e) {}
   s = s || { xp: 0, visited: {} };
   s.spots = s.spots || {}; // 観光地の記録（古いデータには無いので補う）
+  s.stations = s.stations || {}; // 駅の記録（同上）
   return s;
 }
-// テストモード中は保存しない
-function save() { if (demo) return; try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {} }
+// テストモード中は保存しない。記録が変わったので一覧は作り直す
+let listDirty = true;
+function save() { listDirty = true; if (demo) return; try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {} }
 
 // ===== レベル計算（Lv2=100, Lv3=300, Lv4=600 …） =====
 const needXp = L => 50 * (L - 1) * L;
@@ -525,6 +579,90 @@ SPOTS.forEach(s => {
   spotMarkers[s.id] = m;
 });
 
+// ===== 駅（stations.json を必要になったときに読み込む） =====
+let STATIONS = null;              // [{ id, name, pref, city, lat, lng, lines:[路線id], p:[[lat,lng],…]? }]
+let LINES = [];                   // [{ id, label, color, st:[駅id] }]
+let STATION_AREA = '';            // データに入っている範囲（例：群馬県）
+const stationIndex = {}, lineIndex = {};
+let stationsLoading = null, stationsFailedAt = 0;
+function loadStations() {
+  if (STATIONS || stationsLoading) return;
+  if (Date.now() - stationsFailedAt < 30000) return; // 失敗したら30秒は再挑戦しない
+  stationsLoading = fetch(STATIONS_URL, { cache: 'no-cache' })
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(d => {
+      LINES = d.lines || [];
+      LINES.forEach(l => { lineIndex[l.id] = l; });
+      (d.stations || []).forEach(s => { stationIndex[s.id] = s; });
+      STATIONS = d.stations || [];
+      STATION_AREA = d.area || '';
+      map.attributionControl.addAttribution('駅：<a href="https://nlftp.mlit.go.jp/ksj/" target="_blank">国土数値情報（鉄道データ）</a>を加工');
+      listDirty = true;
+      refreshStationLayer();
+      render();
+    })
+    .catch(e => { stationsFailedAt = Date.now(); console.warn('駅データを読み込めませんでした', e); })
+    .finally(() => { stationsLoading = null; });
+}
+const stationColor = st => (lineIndex[st.lines[0]] || {}).color || '#555';
+const lineChips = st => st.lines.map(id => lineIndex[id])
+  .filter(Boolean).map(l => `<span class="line-chip"><i style="background:${esc(l.color)}"></i>${esc(l.label)}</span>`).join('');
+
+// 駅の点は数が多いので、軽い canvas で「路線の色の小さな丸」として描く。
+// 拡大したとき（STATION_MIN_ZOOM 以上）に、画面に入っている駅だけ描く
+const stationRenderer = L.canvas({ padding: 0.3 });
+const stationLayer = L.layerGroup().addTo(map);
+let showStations = true;
+try { showStations = localStorage.getItem(SHOW_STATIONS_KEY) !== '0'; } catch (e) {}
+let stationSig = '';
+function refreshStationLayer() {
+  stationLayer.clearLayers();
+  updateStationToggle();
+  if (!STATIONS || !showStations || map.getZoom() < STATION_MIN_ZOOM) return;
+  const b = map.getBounds().pad(0.3);
+  STATIONS.forEach(st => {
+    if (!b.contains([st.lat, st.lng])) return;
+    const v = state.stations[st.id], color = stationColor(st);
+    // 未訪問：路線の色で塗りつぶし ／ 訪問済み：白抜き（路線の色の太い縁）
+    const m = L.circleMarker([st.lat, st.lng], v
+      ? { renderer: stationRenderer, radius: 6, color, weight: 3, fillColor: '#fff', fillOpacity: 1, bubblingMouseEvents: false }
+      : { renderer: stationRenderer, radius: 6, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1, bubblingMouseEvents: false });
+    m.bindPopup(`<div class="st-pop"><b>🚉 ${esc(st.name)}駅</b><div>${lineChips(st)}</div>` +
+      `<span>${v ? `✅ 訪問済み ${v.count}回` : '未訪問'}</span></div>`, { closeButton: false, offset: [0, -4] });
+    m.on('click', () => { if (demo) setPosition(st.lat, st.lng, 0, true); }); // テストモードではタップした駅にいることにする
+    m.addTo(stationLayer);
+  });
+}
+map.on('moveend', refreshStationLayer);
+
+// 地図右上の「駅」表示ON/OFFボタン
+let stationToggleBtn = null;
+const StationToggle = L.Control.extend({
+  options: { position: 'topright' },
+  onAdd() {
+    const b = L.DomUtil.create('button', 'map-toggle');
+    L.DomEvent.disableClickPropagation(b);
+    b.addEventListener('click', () => {
+      showStations = !showStations;
+      try { localStorage.setItem(SHOW_STATIONS_KEY, showStations ? '1' : '0'); } catch (e) {}
+      if (showStations) loadStations();
+      refreshStationLayer();
+    });
+    stationToggleBtn = b;
+    return b;
+  },
+});
+map.addControl(new StationToggle());
+function updateStationToggle() {
+  const b = stationToggleBtn;
+  if (!b) return;
+  b.classList.toggle('off', !showStations);
+  b.innerHTML = showStations
+    ? '🚉 駅：ON' + (map.getZoom() < STATION_MIN_ZOOM ? '<small>拡大すると表示</small>' : '')
+    : '🚉 駅：OFF';
+}
+updateStationToggle();
+
 // ===== 現在地 =====
 let current = null;      // { lat, lng, acc, muni }
 let lastLookup = null;   // 最後に市町村を調べた地点
@@ -551,7 +689,7 @@ function startWatch() {
   stopWatch();
   $('sub').textContent = 'GPSを探しています…';
   watchId = navigator.geolocation.watchPosition(
-    p => setPosition(p.coords.latitude, p.coords.longitude, p.coords.accuracy),
+    p => setPosition(p.coords.latitude, p.coords.longitude, p.coords.accuracy, false, p.coords.speed),
     err => {
       const msg = err.code === 1
         ? '位置情報の利用が許可されていません。Chromeのアドレスバー左のアイコン →「権限」から許可してください。'
@@ -563,13 +701,45 @@ function startWatch() {
 }
 function stopWatch() { if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; } }
 
-function setPosition(lat, lng, acc, force) {
+// ===== 移動の速さ（電車で通過しただけのチェックインを防ぐ） =====
+let fixes = [];          // 最近の位置 { lat, lng, t }
+let stillTimer = null;
+// GPSが返す速度（m/s）があればそれを使い、無ければ数秒前の位置との差から計算する（km/h。分からなければ null）
+function estimateSpeed(lat, lng, gpsSpeed) {
+  const now = Date.now();
+  fixes.push({ lat, lng, t: now });
+  fixes = fixes.filter(f => now - f.t < 30000);
+  if (typeof gpsSpeed === 'number' && isFinite(gpsSpeed)) return gpsSpeed * 3.6;
+  const old = fixes.filter(f => now - f.t >= SPEED_WINDOW_MS).pop();
+  if (!old) return null;
+  return L.latLng(lat, lng).distanceTo([old.lat, old.lng]) / ((now - old.t) / 1000) * 3.6;
+}
+// 今の速さ（km/h）。しばらく位置が更新されていなければ止まっているとみなす
+function currentSpeed() {
+  if (!current) return null;
+  if (current.speed !== null) return current.speed;
+  return Date.now() - current.t > STILL_AFTER_MS ? 0 : null;
+}
+// 観光地・駅のチェックインを止める理由（動いていなければ null）
+function movingBlock() {
+  if (demo) return null;
+  const sp = currentSpeed();
+  if (sp === null) return '速度を確認中…';
+  if (sp > MAX_SPEED_KMH) return `移動中はチェックインできません（時速約${Math.round(sp)}km）`;
+  return null;
+}
+
+function setPosition(lat, lng, acc, force, gpsSpeed) {
   const ll = L.latLng(lat, lng);
   marker.setLatLng(ll).addTo(map);
   accCircle.setLatLng(ll).setRadius(acc || 0).addTo(map);
   if (firstFix || demo) { map.setView(ll, Math.max(map.getZoom(), 14)); firstFix = false; }
   const prevMuni = current && current.muni;
-  current = { lat, lng, acc, muni: prevMuni };
+  current = { lat, lng, acc, muni: prevMuni, t: Date.now(), speed: demo ? 0 : estimateSpeed(lat, lng, gpsSpeed) };
+  // 速さが分からないときは、少し待って位置が変わらなければ「止まっている」として描き直す
+  clearTimeout(stillTimer);
+  if (current.speed === null) stillTimer = setTimeout(render, STILL_AFTER_MS + 500);
+  loadStations(); // 近くの駅を調べるため、駅データを読み込んでおく
   $('sub').textContent = acc ? `GPS精度 約${Math.round(acc)}m` : 'テスト地点';
   if (force || !lastLookup || ll.distanceTo(lastLookup) > LOOKUP_MOVE_M) {
     lastLookup = ll;
@@ -687,7 +857,7 @@ function spotBlock(n) {
   if (!demo && current.acc > MAX_ACC_M) return `GPS精度が低いです（${MAX_ACC_M}m以内で可能）`;
   const v = state.spots[n.spot.id];
   if (v && v.last === today()) return '今日はチェックイン済み';
-  return null;
+  return movingBlock();
 }
 
 $('spotCheckin').addEventListener('click', () => {
@@ -742,15 +912,145 @@ function renderSpots() {
     hint.textContent = n && n.dist <= SPOT_HINT_M
       ? `🧭 近くの観光地：${spotType(n.spot).icon} ${n.spot.name}（${fmtDist(n.dist)}）` : '';
   }
-
-  // 訪問済み観光地の一覧
-  const ids = Object.keys(state.spots);
-  $('spotCount').textContent = ids.length;
-  $('spotList').innerHTML = `<div class="list-h">観光地（${ids.length} / ${SPOTS.length}）</div>` +
-    (ids.map(id => Object.assign({ id, icon: spotType(spotById(id)).icon }, state.spots[id])).sort((a, b) => a.first < b.first ? 1 : -1)
-      .map(v => `<div class="muni spot-item" data-id="${esc(v.id)}">${v.icon} ${esc(v.name)}${v.memo ? ' 📝' : ''}<span>${esc(v.first)}〜 ${v.count}回</span></div>`).join('')
-     || '<div class="muni">まだありません</div>');
 }
+
+// ===== 駅チェックイン =====
+// 現在地からいちばん近い駅と距離（m）。ホームが離れている駅（p）は一番近いホームまでの距離
+function nearestStation() {
+  if (!current || !STATIONS) return null;
+  const here = L.latLng(current.lat, current.lng);
+  let best = null;
+  STATIONS.forEach(st => {
+    let d = here.distanceTo([st.lat, st.lng]);
+    (st.p || []).forEach(pt => { d = Math.min(d, here.distanceTo(pt)); });
+    if (!best || d < best.dist) best = { st, dist: d };
+  });
+  return best;
+}
+
+// 駅にチェックインできない理由（できるなら null）
+function stationBlock(n) {
+  if (!n || n.dist > STATION_RADIUS_M) return '範囲外';
+  if (!demo && current.acc > MAX_ACC_M) return `GPS精度が低いです（${MAX_ACC_M}m以内で可能）`;
+  const v = state.stations[n.st.id];
+  if (v && v.last === today()) return '今日はチェックイン済み';
+  return movingBlock();
+}
+
+$('stCheckin').addEventListener('click', () => {
+  const n = nearestStation();
+  if (stationBlock(n)) return;
+  const st = n.st, v = state.stations[st.id];
+  let gain, title;
+  if (!v) {
+    gain = XP_STATION_NEW; title = '🚉 駅に到着！';
+    state.stations[st.id] = { name: st.name, pref: st.pref, city: st.city || '', first: today(), last: today(), count: 1 };
+  } else {
+    gain = XP_STATION_REVISIT; title = 'また来ました';
+    v.last = today(); v.count++;
+  }
+  const before = levelOf(state.xp);
+  state.xp += gain;
+  save();
+  const after = levelOf(state.xp);
+  toast(`${title}<br>${esc(st.name)}駅<div class="big">+${gain} XP</div>` +
+        (after > before ? `<div>⬆ レベルアップ！ Lv${after}</div>` : '') +
+        (demo ? '<div style="font-size:12px;opacity:.8">テストモードのため保存されません</div>' : ''));
+  render();
+});
+
+// 駅の近く（STATION_RADIUS_M 以内）にいるときだけ案内カードを出す
+function renderStations() {
+  const n = nearestStation(), box = $('stBox');
+  if (!n || n.dist > STATION_RADIUS_M) { box.hidden = true; return; }
+  const v = state.stations[n.st.id], block = stationBlock(n);
+  box.hidden = false;
+  $('stName').textContent = `🚉 ${n.st.name}駅`;
+  $('stStatus').innerHTML = v
+    ? `<span class="status old">訪問済み ${v.count}回</span>`
+    : '<span class="status new">未訪問！</span>';
+  $('stLines').innerHTML = lineChips(n.st);
+  $('stSub').textContent = `ここから ${fmtDist(n.dist)}`;
+  $('stCheckin').disabled = !!block;
+  $('stCheckin').textContent = block || `駅チェックイン +${v ? XP_STATION_REVISIT : XP_STATION_NEW} XP`;
+}
+
+// ===== 訪問済み一覧（市町村／観光地は県ごと／駅は路線ごとの達成率） =====
+function renderLists() {
+  // 開いているグループは作り直したあとも開いたままにする
+  const openKeys = new Set([...document.querySelectorAll('#list details.comp[open]')].map(d => d.dataset.key));
+  const bar = (n, total, color) =>
+    `<span class="c-bar"><div style="width:${total ? n / total * 100 : 0}%${color ? ';background:' + esc(color) : ''}"></div></span>`;
+  const num = (n, total, unit) => {
+    const done = total > 0 && n === total;
+    return `<span class="c-num${done ? ' done' : ''}">${n} / ${total}${unit}${done ? ' 🎉' : ''}</span>`;
+  };
+  const group = (key, nameHtml, n, total, unit, color, itemsHtml) =>
+    `<details class="comp" data-key="${esc(key)}"${openKeys.has(key) ? ' open' : ''}>` +
+    `<summary><span class="c-name">${nameHtml}</span>${bar(n, total, color)}${num(n, total, unit)}</summary>${itemsHtml}</details>`;
+
+  // 市町村（都道府県の順）
+  const list = Object.values(state.visited);
+  $('count').textContent = list.length;
+  const byPref = {};
+  list.forEach(v => (byPref[v.pref] = byPref[v.pref] || []).push(v));
+  $('visited').innerHTML = `<div class="list-h">市町村（${list.length}）</div>` +
+    Object.keys(byPref).sort((a, b) => prefRank(a) - prefRank(b)).map(p =>
+      `<div class="pref-h">${esc(p)}（${byPref[p].length}）</div>` +
+      byPref[p].sort((a, b) => a.first < b.first ? 1 : -1)
+        .map(v => `<div class="muni">${esc(v.city)}<span>${esc(v.first)}〜 ${v.count}回</span></div>`).join('')
+    ).join('') + (list.length ? '' : '<div class="muni">まだありません</div>');
+
+  // 観光地：県ごとの達成率（タップで開くと、その県の観光地が並ぶ）
+  const sIds = Object.keys(state.spots);
+  $('spotCount').textContent = sIds.length;
+  const groups = {};
+  SPOTS.forEach(s => (groups[s.pref] = groups[s.pref] || []).push({ id: s.id, name: s.name, icon: spotType(s).icon }));
+  sIds.filter(id => !spotById(id)).forEach(id => { // リストから消えた観光地も記録は見せる
+    const v = state.spots[id], p = v.pref || 'その他';
+    (groups[p] = groups[p] || []).push({ id, name: v.name, icon: '📍' });
+  });
+  $('spotList').innerHTML = `<div class="list-h">観光地（${sIds.length} / ${SPOTS.length}）</div>` +
+    Object.keys(groups).sort((a, b) => prefRank(a) - prefRank(b)).map(p => {
+      const items = groups[p].slice().sort((a, b) => (state.spots[b.id] ? 1 : 0) - (state.spots[a.id] ? 1 : 0)); // 訪問済みを上に
+      const n = items.filter(i => state.spots[i.id]).length;
+      return group('pref:' + p, esc(p), n, items.length, '', '', items.map(i => {
+        const v = state.spots[i.id];
+        return `<div class="muni spot-item${v ? '' : ' todo'}" data-id="${esc(i.id)}">${v ? '✅' : '・'} ${i.icon} ${esc(i.name)}${v && v.memo ? ' 📝' : ''}` +
+          `<span>${v ? `${esc(v.first)}〜 ${v.count}回` : '未訪問'}</span></div>`;
+      }).join(''));
+    }).join('');
+
+  // 駅：路線ごとの達成率
+  const stIds = Object.keys(state.stations);
+  $('stCount').textContent = stIds.length;
+  if (!STATIONS) {
+    $('stationList').innerHTML = `<div class="list-h">駅（${stIds.length}）</div><div class="list-note">駅データを読み込み中…</div>`;
+    return;
+  }
+  const nVisited = STATIONS.filter(s => state.stations[s.id]).length;
+  $('stationList').innerHTML = `<div class="list-h">駅（${nVisited} / ${STATIONS.length}）</div>` +
+    `<div class="list-note">路線ごとの達成率（いまは${esc(STATION_AREA || '一部の地域')}内の駅だけ）。駅をタップすると地図でその駅を表示</div>` +
+    LINES.map(l => {
+      const n = l.st.filter(id => state.stations[id]).length;
+      const name = `<span class="line-chip"><i style="background:${esc(l.color)}"></i></span>${esc(l.label)}`;
+      return group('line:' + l.id, name, n, l.st.length, '駅', l.color, l.st.map(id => {
+        const s = stationIndex[id], v = state.stations[id];
+        if (!s) return '';
+        return `<div class="muni st-item${v ? '' : ' todo'}" data-id="${esc(id)}">${v ? '✅' : '・'} ${esc(s.name)}` +
+          `<span>${v ? `${esc(v.first)}〜 ${v.count}回` : '未訪問'}</span></div>`;
+      }).join(''));
+    }).join('');
+}
+// 駅一覧の駅をタップすると、地図をその駅に動かす
+document.addEventListener('click', e => {
+  const item = e.target.closest && e.target.closest('.st-item');
+  if (!item) return;
+  const s = stationIndex[item.dataset.id];
+  if (s) { map.setView([s.lat, s.lng], Math.max(map.getZoom(), 15)); window.scrollTo(0, 0); }
+});
+// 一覧を開いたら駅データも読み込む
+$('list').addEventListener('toggle', () => { if ($('list').open) loadStations(); });
 
 // ===== 観光地の詳細カード =====
 function openSpotDetail(id) {
@@ -852,18 +1152,15 @@ function render() {
     btn.disabled = true; btn.textContent = 'チェックイン';
   }
 
-  // 訪問済み一覧
-  const list = Object.values(state.visited);
-  $('count').textContent = list.length;
-  const byPref = {};
-  list.forEach(v => (byPref[v.pref] = byPref[v.pref] || []).push(v));
-  $('visited').innerHTML = `<div class="list-h">市町村（${list.length}）</div>` + Object.keys(byPref).sort().map(p =>
-    `<div class="pref-h">${esc(p)}（${byPref[p].length}）</div>` +
-    byPref[p].sort((a, b) => a.first < b.first ? 1 : -1)
-      .map(v => `<div class="muni">${esc(v.city)}<span>${esc(v.first)}〜 ${v.count}回</span></div>`).join('')
-  ).join('') + (list.length ? '' : '<div class="muni">まだありません</div>');
-
   renderSpots();
+  renderStations();
+
+  // 一覧は記録が変わったときだけ作り直す（GPSの更新のたびに作り直すと、開いた項目が閉じてしまうため）
+  if (listDirty) { renderLists(); listDirty = false; }
+
+  // 駅の点（訪問済みは白抜き）は、駅の記録が変わったときだけ描き直す
+  const sig = demo + ':' + Object.keys(state.stations).join(',');
+  if (sig !== stationSig) { stationSig = sig; refreshStationLayer(); }
 }
 
 // HTMLに埋め込む文字のエスケープ（読み込んだファイルやOSMの名前に記号が入っていても安全にする）
@@ -880,7 +1177,7 @@ function renderBackupInfo() {
 
 $('export').addEventListener('click', () => {
   const real = demo ? realState : state; // テストモード中でも本物の記録を保存する
-  const data = { app: 'tabilog', version: 1, exported: today(), xp: real.xp, visited: real.visited, spots: real.spots };
+  const data = { app: 'tabilog', version: 1, exported: today(), xp: real.xp, visited: real.visited, spots: real.spots, stations: real.stations };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -904,7 +1201,7 @@ $('importFile').addEventListener('change', async e => {
   let data;
   try { data = parseBackup(await f.text()); }
   catch (err) { alert('読み込めませんでした：' + err.message); return; }
-  const desc = s => `${s.xp} XP・${Object.keys(s.visited).length}市町村・観光地${Object.keys(s.spots).length}か所`;
+  const desc = s => `${s.xp} XP・${Object.keys(s.visited).length}市町村・観光地${Object.keys(s.spots).length}か所・${Object.keys(s.stations).length}駅`;
   if (!confirm(`ファイルの記録（${desc(data)}）で、今の記録（${desc(state)}）を置き換えます。よろしいですか？`)) return;
   state = data; save(); render();
   toast('📂 記録を読み込みました');
@@ -935,7 +1232,18 @@ function parseBackup(text) {
       if (typeof v.memo === 'string' && v.memo) spots[id].memo = v.memo.slice(0, 500);
     }
   }
-  return { xp: Math.floor(j.xp), visited, spots };
+  // 駅の記録（駅機能より前に保存したファイルには無い）
+  const stations = {};
+  if (j.stations !== undefined) {
+    if (typeof j.stations !== 'object' || j.stations === null) throw new Error('記録の形式が正しくありません');
+    for (const [id, v] of Object.entries(j.stations)) {
+      const ok = v && ['name', 'first', 'last'].every(f => typeof v[f] === 'string') && typeof v.count === 'number';
+      if (!ok) throw new Error('駅の記録の形式が正しくありません');
+      stations[id] = { name: v.name, pref: typeof v.pref === 'string' ? v.pref : '', city: typeof v.city === 'string' ? v.city : '',
+        first: v.first, last: v.last, count: v.count };
+    }
+  }
+  return { xp: Math.floor(j.xp), visited, spots, stations };
 }
 
 let toastTimer;
@@ -954,6 +1262,8 @@ function toggleDemo() {
   // テスト中は記録のコピーで遊び、終わったら本物の記録に戻す
   if (demo) { realState = state; state = JSON.parse(JSON.stringify(state)); }
   else { state = realState; realState = null; }
+  fixes = []; // テストの前後で速度の計算が混ざらないように
+  listDirty = true;
   render();
   document.body.classList.toggle('demo', demo);
   $('demo').classList.toggle('on', demo);
@@ -966,7 +1276,7 @@ $('demo').addEventListener('click', toggleDemo);
 map.on('click', e => { if (demo) setPosition(e.latlng.lat, e.latlng.lng, 0, true); });
 $('reset').addEventListener('click', () => {
   if (confirm('経験値と訪問記録をすべて消します。よろしいですか？')) {
-    state = { xp: 0, visited: {}, spots: {} }; save(); render();
+    state = { xp: 0, visited: {}, spots: {}, stations: {} }; save(); render();
   }
 });
 
