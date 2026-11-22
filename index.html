@@ -55,6 +55,31 @@
     box-shadow:0 1px 5px rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center;
     font-weight:700; font-size:14px; }
   .spot-cluster.visited { background:#9aa39f; }
+  /* 観光地のフキダシ（タップで詳細） */
+  .spot-pop { cursor:pointer; text-align:center; }
+  .spot-pop b { display:block; font-size:14px; }
+  .spot-pop span { font-size:11px; color:#7b4fc9; }
+  .leaflet-popup-content { margin:8px 12px; }
+  /* 観光地の詳細カード */
+  .detail { position:fixed; inset:0; z-index:1500; background:rgba(0,0,0,.4); display:flex; align-items:flex-end; justify-content:center; }
+  .detail[hidden] { display:none; }
+  .detail-card { background:#fff; width:100%; max-width:520px; border-radius:16px 16px 0 0;
+    padding:16px 16px calc(16px + env(safe-area-inset-bottom)); max-height:85vh; overflow:auto; }
+  .detail-head { display:flex; gap:12px; align-items:center; }
+  .detail-icon { width:48px; height:48px; flex:none; border:2px solid #7b4fc9; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; font-size:26px; }
+  .detail-icon.t-temple { color:#b3261e; font-weight:700; }
+  .detail-name { font-size:19px; font-weight:700; }
+  .detail-type { font-size:12px; color:var(--muted); }
+  .detail-desc { font-size:14px; line-height:1.7; margin:12px 0; }
+  .detail-rows { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:0; font-size:14px;
+    background:var(--bg); border-radius:10px; padding:10px 12px; }
+  .detail-rows dt { color:var(--muted); }
+  .detail-rows dd { margin:0; font-weight:700; }
+  .detail-route { flex:1; display:flex; align-items:center; justify-content:center; border-radius:10px; padding:12px;
+    background:#7b4fc9; color:#fff; text-decoration:none; font-size:14px; font-weight:700; }
+  .detail-route[hidden] { display:none; }
+  .spot-item { cursor:pointer; }
   .list-h { margin:14px 0 2px; font-size:14px; font-weight:700; }
   .backup-info { font-size:11px; color:var(--muted); margin-top:4px; }
   .reset { margin-top:12px; background:none; color:#b33; font-size:12px; padding:4px; }
@@ -106,6 +131,29 @@
   <div class="backup-info" id="backupInfo"></div>
   <button class="reset" id="reset">記録をすべて消す</button>
 </details>
+<div id="detail" class="detail" hidden>
+  <div class="detail-card" role="dialog" aria-modal="true" aria-labelledby="dName">
+    <div class="detail-head">
+      <div id="dIcon" class="detail-icon"></div>
+      <div>
+        <div id="dName" class="detail-name"></div>
+        <div id="dType" class="detail-type"></div>
+      </div>
+    </div>
+    <p id="dDesc" class="detail-desc"></p>
+    <dl class="detail-rows">
+      <dt>状態</dt><dd id="dStatus"></dd>
+      <dt>初訪問日</dt><dd id="dFirst"></dd>
+      <dt>最終訪問日</dt><dd id="dLast"></dd>
+      <dt>訪問回数</dt><dd id="dCount"></dd>
+      <dt>現在地から</dt><dd id="dDist"></dd>
+    </dl>
+    <div class="row">
+      <a id="dRoute" class="detail-route" target="_blank" rel="noopener">🗺️ 行き方を見る</a>
+      <button id="dClose">閉じる</button>
+    </div>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -258,6 +306,121 @@ const SPOTS = [
 ];
 const spotById = id => SPOTS.find(s => s.id === id);
 
+// 観光地の説明（詳細カードに表示。観光地を追加したらここにも1行足す）
+const SPOT_DESC = {
+  'sapporo-clock-tower': '明治11年に札幌農学校の演武場として建てられた、札幌のシンボル。今も時計台の鐘が時を告げる。',
+  'hakodate-yama': '標高334mの山。山頂から見る函館の夜景が有名で、ロープウェイで登れる。',
+  'chusonji': '奥州藤原氏ゆかりの寺。国宝の金色堂で知られ、「平泉」として世界遺産に登録されている。',
+  'zuiganji': '伊達政宗が再興した松島の名刹。本堂は国宝。日本三景・松島の観光とあわせて訪れたい。',
+  'nikko-toshogu': '徳川家康をまつる神社。陽明門や「見ざる・言わざる・聞かざる」の三猿で知られる世界遺産。',
+  'tokyo-tower': '1958年に完成した高さ333mの電波塔。展望台から東京の街を一望できる。',
+  'tokyo-skytree': '2012年に開業した高さ634mの電波塔。地上350mと450mに展望台がある。',
+  'sensoji': '都内最古とされる寺。雷門と仲見世通りで知られる浅草のシンボル。',
+  'meiji-jingu': '明治天皇と昭憲皇太后をまつる神社。都心とは思えない広い森に囲まれている。',
+  'kamakura-daibutsu': '高徳院にある国宝の阿弥陀如来坐像。高さ約11mの「鎌倉の大仏」。',
+  'yokohama-chinatown': '日本最大級の中華街。食べ歩きや関帝廟めぐりが楽しめる。',
+  'fuji-hongu-sengen': '全国の浅間神社の総本宮。富士山をご神体とし、境内の湧玉池の湧き水が美しい。',
+  'zenkoji': '宗派を問わず参拝できる長野の古刹。「一生に一度は善光寺参り」で知られる。',
+  'kenrokuen': '日本三名園の一つ。加賀藩前田家の大名庭園で、冬の雪吊りが有名。',
+  'shirakawago': '合掌造りの家々が残る世界遺産の集落。冬のライトアップも人気。',
+  'nagoya-castle': '金のしゃちほこで知られる城。復元された本丸御殿は見ごたえがある。',
+  'ise-naiku': '天照大御神をまつる伊勢神宮の内宮。五十鈴川に架かる宇治橋を渡って参拝する。',
+  'kinkakuji': '正式名は鹿苑寺。金箔に覆われた舎利殿が池に映る姿で知られる世界遺産。',
+  'kiyomizudera': '「清水の舞台」で知られる京都の寺。舞台から京都の街を見渡せる世界遺産。',
+  'fushimi-inari': '全国の稲荷神社の総本宮。山へと続く千本鳥居が有名。',
+  'todaiji': '「奈良の大仏」をまつる寺。大仏殿は世界最大級の木造建築。',
+  'osaka-castle': '豊臣秀吉が築いた城。今の天守閣の中は博物館になっている。',
+  'tsutenkaku': '大阪・新世界のシンボルタワー。足の裏をなでると御利益があるというビリケンさんが有名。',
+  'himeji-castle': '白く美しい姿から「白鷺城」と呼ばれる国宝の城。世界遺産。',
+  'izumo-taisha': '縁結びの神・大国主大神をまつる神社。大きなしめ縄で知られる。',
+  'okayama-korakuen': '日本三名園の一つ。岡山藩主池田家の庭園で、岡山城を借景にしている。',
+  'itsukushima-jinja': '海に浮かぶ大鳥居で知られる宮島の神社。世界遺産。',
+  'genbaku-dome': '1945年の原子爆弾の惨禍を今に伝える建物。世界遺産。平和記念公園とあわせて訪れたい。',
+  'dogo-onsen': '日本最古ともいわれる道後温泉のシンボル。重要文化財の木造の共同浴場。',
+  'kotohiragu': '「こんぴらさん」と呼ばれる海の神様の神社。本宮まで長い石段を上る。',
+  'katsurahama': '太平洋に面した高知の名勝。坂本龍馬の像が海を見つめている。',
+  'dazaifu-tenmangu': '学問の神様・菅原道真をまつる神社。合格祈願の参拝者が多い。',
+  'kumamoto-castle': '加藤清正が築いた名城。熊本地震からの復旧が進められている。',
+  'glover-garden': '長崎港を見下ろす丘に洋館が並ぶ。旧グラバー住宅は世界遺産の構成資産。',
+  'shurijo': '琉球王国の王城。正殿は2019年の火災で焼失し、復元工事が進められている。',
+  'churaumi': 'ジンベエザメが泳ぐ巨大水槽「黒潮の海」で知られる水族館。',
+  // 群馬県
+  'kusatsu-yubatake': '草津温泉の中心にある源泉。湯けむりが立ちのぼる湯畑と、夜のライトアップが名物。',
+  'kusatsu-sainokawara': 'あちこちから温泉が湧き出る公園。奥には大きな露天風呂もある。',
+  'ikaho-ishidangai': '伊香保温泉の石段の温泉街。365段の石段を上った先に伊香保神社がある。',
+  'shima-sekizenkan': '四万温泉の老舗旅館。赤い橋と古い建物は「千と千尋の神隠し」のモデルの一つといわれる。',
+  'hoshi-onsen': '明治創業の一軒宿。鹿鳴館風の建物の「法師乃湯」は、足元から湯が湧き出る。',
+  'takaragawa-onsen': '利根川の源流近くの温泉。川沿いに広がる大きな露天風呂で知られる。',
+  'tomioka-silk-mill': '明治5年に建てられた官営の製糸工場。世界遺産「富岡製糸場と絹産業遺産群」の中心。',
+  'usui-megane-bashi': '旧信越本線のレンガ造りのアーチ橋。廃線跡の遊歩道「アプトの道」で上を歩いて渡れる。',
+  'kanayama-castle': '戦国時代の山城の跡。石垣や池の跡が復元されている。日本100名城の一つ。',
+  'iwabitsu-castle': '真田氏ゆかりの山城の跡。岩櫃山のふもとに広がる。',
+  'rinkokaku': '明治時代に建てられた近代和風建築。国の重要文化財。',
+  'iwajuku-museum': '日本に旧石器時代があったことが初めて確かめられた岩宿遺跡の博物館。',
+  'haruna-jinja': '榛名山の山中にある神社。巨岩と杉並木の参道がパワースポットとして人気。',
+  'myogi-jinja': '妙義山のふもとの神社。江戸時代の豪華な社殿は国の重要文化財。',
+  'akagi-jinja': '赤城山の大沼に浮かぶ小鳥ヶ島の神社。朱色の啄木鳥橋が目印。',
+  'serada-toshogu': '徳川家康をまつる神社。日光東照宮から移された社殿が残る。',
+  'kiryu-tenmangu': '桐生の総鎮守。彫刻で飾られた社殿は群馬県の重要文化財。',
+  'shorinzan-darumaji': '縁起だるま発祥の寺。高崎だるまの本場で、境内にはだるまが並ぶ。',
+  'mizusawa-kannon': '坂東三十三観音の第十六番札所。門前には水沢うどんの店が並ぶ。',
+  'morinji': '「分福茶釜」の伝説が伝わる寺。参道にたぬきの置物がずらりと並ぶ。',
+  'takasaki-kannon': '高崎の観音山に立つ高さ約42mの白衣観音。胎内に入って上ることができる。',
+  'fukiware-falls': '「東洋のナイアガラ」と呼ばれる滝。川底の岩が割れたような独特の姿が見どころ。',
+  'hatomachi-toge': '尾瀬ヶ原へ向かう登山口。ここから木道を歩いて尾瀬の湿原へ下りる。',
+  'onioshidashi': '浅間山の噴火で流れ出た溶岩がつくった奇岩の景観。浅間山を間近に望む。',
+  'takatsudo-kyo': '渡良瀬川がつくった渓谷。はねたき橋から見る秋の紅葉が美しい。',
+  'tsutsujigaoka-park': '館林のつつじの名所。春には色とりどりのつつじが咲き誇る。',
+  'tambara-lavender': '標高約1,300mの高原に広がるラベンダー畑。夏が見ごろ。',
+  'gunma-flower-park': '赤城山のふもとにある花の公園。季節の花と温室が楽しめる。',
+  'gunma-pref-office': '高さ約150mの県庁舎。最上階の展望ホールから関東平野を一望できる。',
+  'lockheart-castle': 'スコットランドから移築された本物の古城。ドレスを着て撮影できる体験が人気。',
+  'yamba-dam': '2020年に完成したダム。ダムの見学や周辺の「やんば」エリアの観光が楽しめる。',
+  'usui-railway-village': '旧横川運転区の跡地にある鉄道のテーマパーク。数多くの車両を展示している。',
+  'kawaba-denen-plaza': '全国でも指折りの人気の道の駅。地ビールやパン、ヨーグルトなど川場村の味が楽しめる。',
+  'gunma-safari-park': '車に乗ったまま、動物を間近で見られるサファリパーク。',
+  'gunma-natural-history': '恐竜の全身骨格などを展示する自然史の博物館。',
+  'minakami-onsen': '利根川の上流に広がる温泉街。谷川岳やラフティングなど川遊びの拠点。',
+  'manza-onsen': '標高約1,800mの高原にある、硫黄の香る温泉。',
+  'oigami-onsen': '片品川沿いの温泉街。赤城山の大蛇と日光の大ムカデが戦った伝説が伝わる。',
+  'shiriyaki-onsen': '川底から温泉が湧き出る、川そのものが露天風呂になった野湯。',
+  'kawarayu-onsen': '八ッ場ダムの建設に伴って高台に移った温泉街。共同浴場「王湯」がある。',
+  'sarugakyo-onsen': '赤谷湖のほとりの温泉。上杉謙信の伝説が地名の由来とされる。',
+  'isobe-onsen': '温泉マーク「♨」発祥の地として知られる温泉。磯部せんべいが名物。',
+  'kakumanbuchi': '赤城山の大沼近くの小さな湿原。木道で一周でき、「小尾瀬」とも呼ばれる。',
+  'shoyokyo': '湯ノ小屋温泉の奥に続く渓谷。秋の紅葉の名所。',
+  'marunuma': '日光白根山のふもとにある静かな湖。周辺は丸沼高原のリゾート。',
+  'fujido-cave': '上野村にある大きな鍾乳洞。洞内を歩いて見学できる。',
+  'sanbaseki-kyo': '青みがかった「三波石」が川床に並ぶ渓谷。国の名勝・天然記念物。',
+  'agatsuma-kyo': '吾妻川が刻んだ渓谷。鹿飛橋のあたりは川幅が最も狭くなる景勝地。',
+  'okushima-lake': '四万川ダムでできた湖。「四万ブルー」と呼ばれる青い湖面が美しい。',
+  'aisai-no-oka': '嬬恋村の高原にある展望地。妻への愛を叫ぶ場所として知られる。',
+  'nukisaki-jinja': '上野国一之宮。参道を下った先に社殿がある珍しい「下り宮」。',
+  'nakanotake-jinja': '妙義山の岩山のふもとにある神社。巨大な大国様の像が目を引く。',
+  'kanmuri-inari': '太田市の稲荷神社。縁結びや子宝のご利益で知られ、ボケの花の名所。',
+  'itakura-raiden-jinja': '全国の雷電神社の総本宮。精巧な彫刻で飾られた社殿が見どころ。',
+  'kashozan-mirokuji': '迦葉山の中腹にある寺。日本一とされる大きな天狗の面がある。',
+  'hotokuji': '桐生の禅寺。磨かれた床に紅葉が映る「床もみじ」が人気。',
+  'tajima-yahei-house': '蚕の飼い方を改良した田島弥平の旧宅。世界遺産の構成資産。',
+  'takayamasha': '養蚕の技術を教えた高山長五郎の家と学校の跡。世界遺産の構成資産。',
+  'tago-hi': '奈良時代の石碑で、上野三碑の一つ。ユネスコ「世界の記憶」に登録されている。',
+  'hotoda-kofun': '5世紀の古墳が並ぶ史跡。八幡塚古墳は埴輪が並ぶ当時の姿に復元されている。',
+  'watanuki-kannonyama': '6世紀の前方後円墳。出土品は国宝で、石室の中に入って見学できる。',
+  'niijima-jo-house': '同志社の創立者・新島襄の両親が住んだ、安中藩の武家長屋。',
+  'tatebayashi-museum': '自然と人をテーマにした美術館。広い芝生の中に建つ建物も美しい。',
+  'hara-museum-arc': '伊香保近くの現代美術館。黒い木造の建物と広い芝生が印象的。',
+  'numata-castle': '真田氏ゆかりの沼田城の跡。今は公園になり、石垣や鐘楼が残る。',
+  'nagurumi-castle': '真田氏と北条氏が争った城の跡。豊臣秀吉の小田原攻めのきっかけになった。',
+  'kiryu-shinmachi': '織物で栄えた桐生の古い町並み。有鄰館はレンガ蔵などの建物群。重要伝統的建造物群保存地区。',
+  'akaiwa-village': '養蚕農家の家並みが残る山あいの集落。重要伝統的建造物群保存地区。',
+  'takumi-no-sato': '宿場の面影を残す町並みに工房が点在し、手作り体験ができる里。',
+  'gateau-festa-harada': 'ラスク「グーテ・デ・ロワ」で知られる洋菓子店の本館。神殿のような建物が目を引く。',
+  'konnyaku-park': 'こんにゃくの工場見学と、無料の試食バイキングが人気のテーマパーク。',
+  'gunma-kodomo-no-kuni': '金山のふもとにある大きな公園。長い滑り台や児童会館がある。',
+  'kronenberg': 'ドイツの農村をイメージした牧場のテーマパーク。動物とのふれあいやソーセージ作りが楽しめる。',
+  'kiryugaoka-zoo': '入園無料の動物園。となりには遊園地もある。',
+};
+
 // 観光地の種類と地図のアイコン（観光地を追加するときは type をこの中から選ぶ）
 const SPOT_TYPES = {
   shrine:   { icon: '⛩️', label: '神社' },
@@ -337,9 +500,14 @@ spotLayer.addTo(map);
 
 const spotMarkers = {};
 SPOTS.forEach(s => {
+  // タップすると名前のフキダシ、フキダシをタップすると詳細カード
   const m = L.marker([s.lat, s.lng], { icon: spotIcon(s, false) })
-    .bindTooltip(`${spotType(s).icon} ${s.name}`, { direction: 'top' })
+    .bindPopup(`<div class="spot-pop"><b>${spotType(s).icon} ${esc(s.name)}</b><span>タップで詳細 ›</span></div>`,
+      { closeButton: false, offset: [0, -10], autoPanPadding: [20, 20] })
     .addTo(spotLayer);
+  m.on('popupopen', e => {
+    e.popup.getElement().querySelector('.spot-pop').onclick = () => { m.closePopup(); openSpotDetail(s.id); };
+  });
   m.visited = false;
   m.on('click', () => { if (demo) setPosition(s.lat, s.lng, 0, true); }); // テストモードではアイコンをタップするとその場所へ
   spotMarkers[s.id] = m;
@@ -567,10 +735,46 @@ function renderSpots() {
   const ids = Object.keys(state.spots);
   $('spotCount').textContent = ids.length;
   $('spotList').innerHTML = `<div class="list-h">観光地（${ids.length} / ${SPOTS.length}）</div>` +
-    (ids.map(id => Object.assign({ icon: spotType(spotById(id)).icon }, state.spots[id])).sort((a, b) => a.first < b.first ? 1 : -1)
-      .map(v => `<div class="muni">${v.icon} ${esc(v.name)}<span>${esc(v.first)}〜 ${v.count}回</span></div>`).join('')
+    (ids.map(id => Object.assign({ id, icon: spotType(spotById(id)).icon }, state.spots[id])).sort((a, b) => a.first < b.first ? 1 : -1)
+      .map(v => `<div class="muni spot-item" data-id="${esc(v.id)}">${v.icon} ${esc(v.name)}<span>${esc(v.first)}〜 ${v.count}回</span></div>`).join('')
      || '<div class="muni">まだありません</div>');
 }
+
+// ===== 観光地の詳細カード =====
+function openSpotDetail(id) {
+  const s = spotById(id), v = state.spots[id];
+  if (!s && !v) return;
+  const t = spotType(s);
+  $('dIcon').textContent = t.icon;
+  $('dIcon').className = 'detail-icon t-' + ((s && s.type) || 'other');
+  $('dName').textContent = s ? s.name : v.name;
+  $('dType').textContent = [t.label, (s && s.pref) || (v && v.pref)].filter(Boolean).join('・');
+  $('dDesc').textContent = SPOT_DESC[id] || '説明はまだありません。';
+  $('dStatus').textContent = v ? '✅ 訪問済み' : '未訪問';
+  $('dFirst').textContent = v ? v.first : '未訪問';
+  $('dLast').textContent = v ? v.last : '―';
+  $('dCount').textContent = `${v ? v.count : 0}回`;
+  if (s && current) {
+    $('dDist').textContent = fmtDist(L.latLng(current.lat, current.lng).distanceTo([s.lat, s.lng]));
+  } else {
+    $('dDist').textContent = s ? '現在地が未取得' : '―';
+  }
+  // 行き方はGoogleマップ（アプリがあればアプリ）で開く
+  if (s) {
+    $('dRoute').href = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`;
+    $('dRoute').hidden = false;
+  } else {
+    $('dRoute').hidden = true; // リストから消えた観光地は位置が分からない
+  }
+  $('detail').hidden = false;
+}
+function closeSpotDetail() { $('detail').hidden = true; }
+$('dClose').addEventListener('click', closeSpotDetail);
+$('detail').addEventListener('click', e => { if (e.target === $('detail')) closeSpotDetail(); }); // 外側をタップで閉じる
+$('spotList').addEventListener('click', e => { // 訪問済み一覧からも詳細を開ける
+  const item = e.target.closest('.spot-item');
+  if (item) openSpotDetail(item.dataset.id);
+});
 
 // ===== 画面更新 =====
 function showPlace(name, pref, sub) {
