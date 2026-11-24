@@ -50,14 +50,15 @@
   .spot-marker { background:#fff; border:2px solid #7b4fc9; border-radius:50%; box-shadow:0 1px 4px rgba(0,0,0,.35);
     display:flex; align-items:center; justify-content:center; font-size:16px; line-height:1; }
   .spot-marker.t-temple span { color:#b3261e; font-weight:700; font-size:17px; }
-  .spot-marker.visited { border-color:#9aa39f; filter:grayscale(1); opacity:.6; }
+  /* 訪問済み：アイコンは元の色のまま、ふちを黄緑に */
+  .spot-marker.visited { border:3px solid #7cb342; background:#f3fae9; }
   .spot-cluster { background:#7b4fc9; color:#fff; border:3px solid rgba(255,255,255,.9); border-radius:50%;
     box-shadow:0 1px 5px rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center;
     font-weight:700; font-size:14px; }
-  .spot-cluster.visited { background:#9aa39f; }
+  .spot-cluster.visited { background:#7cb342; }
   /* レア枠（金の枠） */
   .spot-marker.rare { border:3px solid #d4a017; background:#fff8dc; box-shadow:0 0 0 2px rgba(212,160,23,.35), 0 1px 5px rgba(0,0,0,.4); }
-  .spot-marker.rare.visited { filter:none; opacity:.75; }
+  .spot-marker.rare.visited { border:3px solid #d4a017; background:#fff8dc; box-shadow:0 0 0 3px #7cb342, 0 1px 5px rgba(0,0,0,.4); }
   .spot-cluster.rare { border-color:#d4a017; box-shadow:0 0 0 3px rgba(212,160,23,.6), 0 1px 5px rgba(0,0,0,.4); }
   .spot.rare { border-color:#d4a017; background:#fffbea; }
   .spot.rare .spot-name { color:#9a6b00; }
@@ -405,8 +406,8 @@ function spotIcon(s, visited, fav) {
 // 読み込みに失敗したときは、まとめずにそのまま地図に置く
 const spotLayer = L.markerClusterGroup
   ? L.markerClusterGroup({
-      maxClusterRadius: 45,          // この画面上の距離（px）以内の印をまとめる
-      disableClusteringAtZoom: 14,   // ここまで拡大したら全部ばらして表示する
+      maxClusterRadius: 25,          // この画面上の距離（px）以内の印をまとめる（小さいほどまとめにくい。多少の重なりは許す）
+      disableClusteringAtZoom: 12,   // ここまで拡大したら全部ばらして表示する
       showCoverageOnHover: false,
       spiderfyOnMaxZoom: false,
       iconCreateFunction: cluster => {
