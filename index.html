@@ -79,6 +79,11 @@
   .detail-icon.t-temple { color:#b3261e; font-weight:700; }
   .detail-name { font-size:19px; font-weight:700; }
   .detail-type { font-size:12px; color:var(--muted); }
+  /* 世界遺産の表記（詳細カード） */
+  .detail-wh { margin-top:10px; padding:6px 10px; border-radius:8px; font-size:13px; font-weight:700; line-height:1.5;
+    background:#e8f1fb; color:#1f4e8c; border:1px solid #b9d2ef; }
+  .detail-wh.nature { background:#e9f6ec; color:#1e6b34; border-color:#b7dfc1; }
+  .detail-wh[hidden] { display:none; }
   .detail-desc { font-size:14px; line-height:1.7; margin:12px 0; }
   .detail-rows { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:0; font-size:14px;
     background:var(--bg); border-radius:10px; padding:10px 12px; }
@@ -263,6 +268,7 @@
       </div>
       <button id="dFav" class="fav-btn" aria-pressed="false">☆<small>お気に入り</small></button>
     </div>
+    <div id="dWh" class="detail-wh" hidden></div>
     <p id="dDesc" class="detail-desc"></p>
     <dl class="detail-rows">
       <dt>状態</dt><dd id="dStatus"></dd>
@@ -1139,6 +1145,14 @@ function openSpotDetail(id) {
   const pref = s ? spotPrefs(s).join('・') : (v && v.pref) || '', city = (s && s.city) || (v && v.city) || '';
   $('dType').textContent = [s && s.rare ? '✨ レアスポット' : '', t.label, (pref + ' ' + city).trim()].filter(Boolean).join('・');
   $('dDesc').textContent = SPOT_DESC[id] || '説明はまだありません。';
+  // 世界遺産（spots.json の wh: { type: 'culture' | 'nature', name: 世界遺産の名前 }）
+  const wh = s && s.wh;
+  $('dWh').hidden = !wh;
+  if (wh) {
+    const nature = wh.type === 'nature';
+    $('dWh').className = 'detail-wh' + (nature ? ' nature' : '');
+    $('dWh').textContent = `${nature ? '🌳 世界自然遺産' : '🏛️ 世界文化遺産'}「${wh.name}」`;
+  }
   $('dStatus').textContent = v ? '✅ 訪問済み' : '未訪問';
   $('dFirst').textContent = v ? v.first : '未訪問';
   $('dLast').textContent = v ? v.last : '―';
