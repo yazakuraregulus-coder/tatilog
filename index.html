@@ -55,6 +55,13 @@
     box-shadow:0 1px 5px rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center;
     font-weight:700; font-size:14px; }
   .spot-cluster.visited { background:#9aa39f; }
+  /* レア枠（金の枠） */
+  .spot-marker.rare { border:3px solid #d4a017; background:#fff8dc; box-shadow:0 0 0 2px rgba(212,160,23,.35), 0 1px 5px rgba(0,0,0,.4); }
+  .spot-marker.rare.visited { filter:none; opacity:.75; }
+  .spot-cluster.rare { border-color:#d4a017; box-shadow:0 0 0 3px rgba(212,160,23,.6), 0 1px 5px rgba(0,0,0,.4); }
+  .spot.rare { border-color:#d4a017; background:#fffbea; }
+  .spot.rare .spot-name { color:#9a6b00; }
+  .detail-icon.rare { border:3px solid #d4a017; background:#fff8dc; }
   /* 観光地のフキダシ（タップで詳細） */
   .spot-pop { cursor:pointer; text-align:center; }
   .spot-pop b { display:block; font-size:14px; }
@@ -310,250 +317,16 @@ const PREF_ORDER = ['北海道','青森県','岩手県','宮城県','秋田県',
 const prefRank = p => { const i = PREF_ORDER.indexOf(p); return i < 0 ? 99 : i; };
 
 // ===== 観光地リスト =====
-// 追加するときは同じ形で1行足す。id は英数字とハイフンで、一度決めたら変えない（記録のキーになる）
-const SPOTS = [
-  { id: 'sapporo-clock-tower', type: 'history', name: '札幌市時計台', pref: '北海道', city: '札幌市', lat: 43.0625, lng: 141.3536 },
-  { id: 'hakodate-yama', type: 'mountain', name: '函館山', pref: '北海道', city: '函館市', lat: 41.7593, lng: 140.7043 },
-  { id: 'chusonji', type: 'temple', name: '中尊寺', pref: '岩手県', city: '平泉町', lat: 39.0011, lng: 141.1003 },
-  { id: 'zuiganji', type: 'temple', name: '瑞巌寺（松島）', pref: '宮城県', city: '松島町', lat: 38.3719, lng: 141.0597 },
-  { id: 'nikko-toshogu', type: 'shrine', name: '日光東照宮', pref: '栃木県', city: '日光市', lat: 36.7581, lng: 139.5988 },
-  { id: 'tokyo-tower', type: 'tower', name: '東京タワー', pref: '東京都', city: '港区', lat: 35.6586, lng: 139.7454 },
-  { id: 'tokyo-skytree', type: 'tower', name: '東京スカイツリー', pref: '東京都', city: '墨田区', lat: 35.7101, lng: 139.8107 },
-  { id: 'sensoji', type: 'temple', name: '浅草寺', pref: '東京都', city: '台東区', lat: 35.7148, lng: 139.7967 },
-  { id: 'meiji-jingu', type: 'shrine', name: '明治神宮', pref: '東京都', city: '渋谷区', lat: 35.6764, lng: 139.6993 },
-  { id: 'kamakura-daibutsu', type: 'temple', name: '鎌倉大仏（高徳院）', pref: '神奈川県', city: '鎌倉市', lat: 35.3169, lng: 139.5359 },
-  { id: 'yokohama-chinatown', type: 'town', name: '横浜中華街', pref: '神奈川県', city: '横浜市', lat: 35.4437, lng: 139.6465 },
-  { id: 'fuji-hongu-sengen', type: 'shrine', name: '富士山本宮浅間大社', pref: '静岡県', city: '富士宮市', lat: 35.2273, lng: 138.6100 },
-  { id: 'zenkoji', type: 'temple', name: '善光寺', pref: '長野県', city: '長野市', lat: 36.6614, lng: 138.1878 },
-  { id: 'kenrokuen', type: 'flower', name: '兼六園', pref: '石川県', city: '金沢市', lat: 36.5621, lng: 136.6627 },
-  { id: 'shirakawago', type: 'town', name: '白川郷', pref: '岐阜県', city: '白川村', lat: 36.2577, lng: 136.9064 },
-  { id: 'nagoya-castle', type: 'castle', name: '名古屋城', pref: '愛知県', city: '名古屋市', lat: 35.1856, lng: 136.8991 },
-  { id: 'ise-naiku', type: 'shrine', name: '伊勢神宮 内宮', pref: '三重県', city: '伊勢市', lat: 34.4551, lng: 136.7254 },
-  { id: 'kinkakuji', type: 'temple', name: '金閣寺', pref: '京都府', city: '京都市', lat: 35.0394, lng: 135.7292 },
-  { id: 'kiyomizudera', type: 'temple', name: '清水寺', pref: '京都府', city: '京都市', lat: 34.9949, lng: 135.7850 },
-  { id: 'fushimi-inari', type: 'shrine', name: '伏見稲荷大社', pref: '京都府', city: '京都市', lat: 34.9671, lng: 135.7727 },
-  { id: 'todaiji', type: 'temple', name: '東大寺', pref: '奈良県', city: '奈良市', lat: 34.6890, lng: 135.8398 },
-  { id: 'osaka-castle', type: 'castle', name: '大阪城', pref: '大阪府', city: '大阪市', lat: 34.6873, lng: 135.5262 },
-  { id: 'tsutenkaku', type: 'tower', name: '通天閣', pref: '大阪府', city: '大阪市', lat: 34.6525, lng: 135.5063 },
-  { id: 'himeji-castle', type: 'castle', name: '姫路城', pref: '兵庫県', city: '姫路市', lat: 34.8394, lng: 134.6939 },
-  { id: 'izumo-taisha', type: 'shrine', name: '出雲大社', pref: '島根県', city: '出雲市', lat: 35.4020, lng: 132.6857 },
-  { id: 'okayama-korakuen', type: 'flower', name: '岡山後楽園', pref: '岡山県', city: '岡山市', lat: 34.6663, lng: 133.9374 },
-  { id: 'itsukushima-jinja', type: 'shrine', name: '厳島神社', pref: '広島県', city: '廿日市市', lat: 34.2959, lng: 132.3199 },
-  { id: 'genbaku-dome', type: 'history', name: '原爆ドーム', pref: '広島県', city: '広島市', lat: 34.3955, lng: 132.4536 },
-  { id: 'dogo-onsen', type: 'onsen', name: '道後温泉本館', pref: '愛媛県', city: '松山市', lat: 33.8520, lng: 132.7863 },
-  { id: 'kotohiragu', type: 'shrine', name: '金刀比羅宮', pref: '香川県', city: '琴平町', lat: 34.1839, lng: 133.8091 },
-  { id: 'katsurahama', type: 'sea', name: '桂浜', pref: '高知県', city: '高知市', lat: 33.4970, lng: 133.5746 },
-  { id: 'dazaifu-tenmangu', type: 'shrine', name: '太宰府天満宮', pref: '福岡県', city: '太宰府市', lat: 33.5215, lng: 130.5349 },
-  { id: 'kumamoto-castle', type: 'castle', name: '熊本城', pref: '熊本県', city: '熊本市', lat: 32.8063, lng: 130.7059 },
-  { id: 'glover-garden', type: 'history', name: 'グラバー園', pref: '長崎県', city: '長崎市', lat: 32.7343, lng: 129.8692 },
-  { id: 'shurijo', type: 'castle', name: '首里城', pref: '沖縄県', city: '那覇市', lat: 26.2170, lng: 127.7195 },
-  { id: 'churaumi', type: 'animal', name: '沖縄美ら海水族館', pref: '沖縄県', city: '本部町', lat: 26.6943, lng: 127.8779 },
-
-  // --- 群馬県（2026-11-21 追加。座標は OpenStreetMap / 国土地理院の地名検索で確認） ---
-  // 温泉
-  { id: 'kusatsu-yubatake', type: 'onsen', name: '湯畑（草津温泉）', pref: '群馬県', city: '草津町', lat: 36.6229, lng: 138.5967 },
-  { id: 'kusatsu-sainokawara', type: 'onsen', name: '西の河原公園（草津温泉）', pref: '群馬県', city: '草津町', lat: 36.6241, lng: 138.5904 },
-  { id: 'ikaho-ishidangai', type: 'onsen', name: '伊香保温泉 石段街', pref: '群馬県', city: '渋川市', lat: 36.4977, lng: 138.9164 },
-  { id: 'shima-sekizenkan', type: 'onsen', name: '四万温泉 積善館', pref: '群馬県', city: '中之条町', lat: 36.6863, lng: 138.7734 },
-  { id: 'hoshi-onsen', type: 'onsen', name: '法師温泉 長寿館', pref: '群馬県', city: 'みなかみ町', lat: 36.7440, lng: 138.8305 },
-  { id: 'takaragawa-onsen', type: 'onsen', name: '宝川温泉 汪泉閣', pref: '群馬県', city: 'みなかみ町', lat: 36.8478, lng: 139.0478 },
-  // 歴史・文化
-  { id: 'tomioka-silk-mill', type: 'history', name: '富岡製糸場', pref: '群馬県', city: '富岡市', lat: 36.2554, lng: 138.8876 },
-  { id: 'usui-megane-bashi', type: 'history', name: '碓氷第三橋梁（めがね橋）', pref: '群馬県', city: '安中市', lat: 36.3580, lng: 138.6983 },
-  { id: 'kanayama-castle', type: 'castle', name: '金山城跡', pref: '群馬県', city: '太田市', lat: 36.3169, lng: 139.3778 },
-  { id: 'iwabitsu-castle', type: 'castle', name: '岩櫃城跡', pref: '群馬県', city: '東吾妻町', lat: 36.5593, lng: 138.8045 },
-  { id: 'rinkokaku', type: 'history', name: '臨江閣', pref: '群馬県', city: '前橋市', lat: 36.3959, lng: 139.0622 },
-  { id: 'iwajuku-museum', type: 'history', name: '岩宿博物館', pref: '群馬県', city: 'みどり市', lat: 36.3991, lng: 139.2857 },
-  // 神社・寺
-  { id: 'haruna-jinja', type: 'shrine', name: '榛名神社', pref: '群馬県', city: '高崎市', lat: 36.4584, lng: 138.8525 },
-  { id: 'myogi-jinja', type: 'shrine', name: '妙義神社', pref: '群馬県', city: '富岡市', lat: 36.3005, lng: 138.7626 },
-  { id: 'akagi-jinja', type: 'shrine', name: '赤城神社（赤城大沼）', pref: '群馬県', city: '前橋市', lat: 36.5527, lng: 139.1835 },
-  { id: 'serada-toshogu', type: 'shrine', name: '世良田東照宮', pref: '群馬県', city: '太田市', lat: 36.2618, lng: 139.2754 },
-  { id: 'kiryu-tenmangu', type: 'shrine', name: '桐生天満宮', pref: '群馬県', city: '桐生市', lat: 36.4218, lng: 139.3462 },
-  { id: 'shorinzan-darumaji', type: 'temple', name: '少林山達磨寺', pref: '群馬県', city: '高崎市', lat: 36.3299, lng: 138.9574 },
-  { id: 'mizusawa-kannon', type: 'temple', name: '水澤観音（水澤寺）', pref: '群馬県', city: '渋川市', lat: 36.4794, lng: 138.9455 },
-  { id: 'morinji', type: 'temple', name: '茂林寺', pref: '群馬県', city: '館林市', lat: 36.2245, lng: 139.5312 },
-  { id: 'takasaki-kannon', type: 'temple', name: '高崎白衣大観音', pref: '群馬県', city: '高崎市', lat: 36.3110, lng: 138.9806 },
-  // 自然
-  { id: 'fukiware-falls', type: 'nature', name: '吹割の滝', pref: '群馬県', city: '沼田市', lat: 36.7021, lng: 139.2071 },
-  { id: 'hatomachi-toge', type: 'mountain', name: '鳩待峠（尾瀬）', pref: '群馬県', city: '片品村', lat: 36.8903, lng: 139.2005 },
-  { id: 'onioshidashi', type: 'mountain', name: '鬼押出し園', pref: '群馬県', city: '嬬恋村', lat: 36.4438, lng: 138.5325 },
-  { id: 'takatsudo-kyo', type: 'nature', name: '高津戸峡', pref: '群馬県', city: 'みどり市', lat: 36.4376, lng: 139.2794 },
-  { id: 'tsutsujigaoka-park', type: 'flower', name: 'つつじが岡公園', pref: '群馬県', city: '館林市', lat: 36.2413, lng: 139.5451 },
-  { id: 'tambara-lavender', type: 'flower', name: 'たんばらラベンダーパーク', pref: '群馬県', city: '沼田市', lat: 36.7795, lng: 139.0731 },
-  { id: 'gunma-flower-park', type: 'flower', name: 'ぐんまフラワーパーク', pref: '群馬県', city: '前橋市', lat: 36.4560, lng: 139.1756 },
-  // 新しめの人気スポット
-  { id: 'gunma-pref-office', type: 'landmark', name: '群馬県庁', pref: '群馬県', city: '前橋市', lat: 36.3911, lng: 139.0607 },
-  { id: 'lockheart-castle', type: 'castle', name: 'ロックハート城', pref: '群馬県', city: '高山村', lat: 36.6320, lng: 138.9883 },
-  { id: 'yamba-dam', type: 'landmark', name: '八ッ場ダム', pref: '群馬県', city: '長野原町', lat: 36.5571, lng: 138.7146 },
-  { id: 'usui-railway-village', type: 'leisure', name: '碓氷峠鉄道文化むら', pref: '群馬県', city: '安中市', lat: 36.3368, lng: 138.7325 },
-  { id: 'kawaba-denen-plaza', type: 'leisure', name: '道の駅 川場田園プラザ', pref: '群馬県', city: '川場村', lat: 36.6867, lng: 139.1069 },
-  { id: 'gunma-safari-park', type: 'animal', name: '群馬サファリパーク', pref: '群馬県', city: '富岡市', lat: 36.2258, lng: 138.8851 },
-  { id: 'gunma-natural-history', type: 'history', name: '群馬県立自然史博物館', pref: '群馬県', city: '富岡市', lat: 36.2697, lng: 138.8668 },
-
-  // --- 群馬県 第2弾（2026-11-22 追加。座標は OpenStreetMap / 国土地理院の地名検索で確認） ---
-  // 温泉
-  { id: 'minakami-onsen', type: 'onsen', name: '水上温泉', pref: '群馬県', city: 'みなかみ町', lat: 36.7755, lng: 138.9679 },
-  { id: 'manza-onsen', type: 'onsen', name: '万座温泉', pref: '群馬県', city: '嬬恋村', lat: 36.6407, lng: 138.5085 },
-  { id: 'oigami-onsen', type: 'onsen', name: '老神温泉', pref: '群馬県', city: '沼田市', lat: 36.6683, lng: 139.2098 },
-  { id: 'shiriyaki-onsen', type: 'onsen', name: '尻焼温泉', pref: '群馬県', city: '中之条町', lat: 36.6481, lng: 138.6408 },
-  { id: 'kawarayu-onsen', type: 'onsen', name: '川原湯温泉', pref: '群馬県', city: '長野原町', lat: 36.5496, lng: 138.7045 },
-  { id: 'sarugakyo-onsen', type: 'onsen', name: '猿ヶ京温泉', pref: '群馬県', city: 'みなかみ町', lat: 36.7252, lng: 138.8878 },
-  { id: 'isobe-onsen', type: 'onsen', name: '磯部温泉', pref: '群馬県', city: '安中市', lat: 36.3003, lng: 138.8464 },
-  // 自然
-  { id: 'kakumanbuchi', type: 'nature', name: '覚満淵', pref: '群馬県', city: '前橋市', lat: 36.5433, lng: 139.1903 },
-  { id: 'shoyokyo', type: 'nature', name: '照葉峡', pref: '群馬県', city: 'みなかみ町', lat: 36.8503, lng: 139.1157 },
-  { id: 'marunuma', type: 'nature', name: '丸沼', pref: '群馬県', city: '片品村', lat: 36.8345, lng: 139.3478 },
-  { id: 'fujido-cave', type: 'nature', name: '不二洞', pref: '群馬県', city: '上野村', lat: 36.0719, lng: 138.7763 },
-  { id: 'sanbaseki-kyo', type: 'nature', name: '三波石峡', pref: '群馬県', city: '藤岡市', lat: 36.1285, lng: 139.0315 }, // 県境の峡谷。群馬側（藤岡市）に寄せてある
-  { id: 'agatsuma-kyo', type: 'nature', name: '吾妻峡（鹿飛橋）', pref: '群馬県', city: '東吾妻町', lat: 36.5620, lng: 138.7214 },
-  { id: 'okushima-lake', type: 'nature', name: '奥四万湖（四万川ダム）', pref: '群馬県', city: '中之条町', lat: 36.6970, lng: 138.7806 },
-  { id: 'aisai-no-oka', type: 'mountain', name: '愛妻の丘', pref: '群馬県', city: '嬬恋村', lat: 36.5056, lng: 138.4590 },
-  // 神社・寺
-  { id: 'nukisaki-jinja', type: 'shrine', name: '一之宮貫前神社', pref: '群馬県', city: '富岡市', lat: 36.2550, lng: 138.8576 },
-  { id: 'nakanotake-jinja', type: 'shrine', name: '中之嶽神社', pref: '群馬県', city: '下仁田町', lat: 36.2839, lng: 138.7346 },
-  { id: 'kanmuri-inari', type: 'shrine', name: '冠稲荷神社', pref: '群馬県', city: '太田市', lat: 36.2687, lng: 139.3515 },
-  { id: 'itakura-raiden-jinja', type: 'shrine', name: '雷電神社（板倉）', pref: '群馬県', city: '板倉町', lat: 36.2275, lng: 139.6078 },
-  { id: 'kashozan-mirokuji', type: 'temple', name: '迦葉山 弥勒寺', pref: '群馬県', city: '沼田市', lat: 36.7510, lng: 139.0633 },
-  { id: 'hotokuji', type: 'temple', name: '宝徳寺', pref: '群馬県', city: '桐生市', lat: 36.4527, lng: 139.3173 },
-  // 歴史・文化（富岡製糸場の世界遺産の構成資産を含む）
-  { id: 'tajima-yahei-house', type: 'history', name: '田島弥平旧宅', pref: '群馬県', city: '伊勢崎市', lat: 36.2466, lng: 139.2391 },
-  { id: 'takayamasha', type: 'history', name: '高山社跡', pref: '群馬県', city: '藤岡市', lat: 36.2034, lng: 139.0316 },
-  { id: 'tago-hi', type: 'history', name: '多胡碑', pref: '群馬県', city: '高崎市', lat: 36.2649, lng: 138.9964 },
-  { id: 'hotoda-kofun', type: 'history', name: '保渡田古墳群（かみつけの里博物館）', pref: '群馬県', city: '高崎市', lat: 36.3789, lng: 138.9861 },
-  { id: 'watanuki-kannonyama', type: 'history', name: '綿貫観音山古墳', pref: '群馬県', city: '高崎市', lat: 36.3075, lng: 139.0773 },
-  { id: 'niijima-jo-house', type: 'history', name: '新島襄旧宅', pref: '群馬県', city: '安中市', lat: 36.3206, lng: 138.8849 },
-  { id: 'tatebayashi-museum', type: 'history', name: '群馬県立館林美術館', pref: '群馬県', city: '館林市', lat: 36.2647, lng: 139.5057 },
-  { id: 'hara-museum-arc', type: 'history', name: 'ハラ ミュージアム アーク', pref: '群馬県', city: '渋川市', lat: 36.5032, lng: 138.9456 },
-  { id: 'numata-castle', type: 'castle', name: '沼田城跡（沼田公園）', pref: '群馬県', city: '沼田市', lat: 36.6482, lng: 139.0400 },
-  { id: 'nagurumi-castle', type: 'castle', name: '名胡桃城址', pref: '群馬県', city: 'みなかみ町', lat: 36.6699, lng: 138.9919 },
-  // 街並み
-  { id: 'kiryu-shinmachi', type: 'town', name: '桐生新町（有鄰館）', pref: '群馬県', city: '桐生市', lat: 36.4166, lng: 139.3431 },
-  { id: 'akaiwa-village', type: 'town', name: '赤岩集落', pref: '群馬県', city: '中之条町', lat: 36.5852, lng: 138.6506 },
-  { id: 'takumi-no-sato', type: 'town', name: 'たくみの里', pref: '群馬県', city: 'みなかみ町', lat: 36.6954, lng: 138.9108 },
-  // レジャー・動物
-  { id: 'gateau-festa-harada', type: 'leisure', name: 'ガトーフェスタ ハラダ 本館', pref: '群馬県', city: '高崎市', lat: 36.2693, lng: 139.1148 },
-  { id: 'konnyaku-park', type: 'leisure', name: 'こんにゃくパーク', pref: '群馬県', city: '甘楽町', lat: 36.2437, lng: 138.9202 },
-  { id: 'gunma-kodomo-no-kuni', type: 'leisure', name: 'ぐんまこどもの国', pref: '群馬県', city: '太田市', lat: 36.3190, lng: 139.3717 },
-  { id: 'kronenberg', type: 'leisure', name: '赤城高原牧場クローネンベルク', pref: '群馬県', city: '前橋市', lat: 36.4767, lng: 139.1925 },
-  { id: 'kiryugaoka-zoo', type: 'animal', name: '桐生が岡動物園', pref: '群馬県', city: '桐生市', lat: 36.4206, lng: 139.3398 },
-];
-const spotById = id => SPOTS.find(s => s.id === id);
-
-// 観光地の説明（詳細カードに表示。観光地を追加したらここにも1行足す）
-const SPOT_DESC = {
-  'sapporo-clock-tower': '明治11年に札幌農学校の演武場として建てられた、札幌のシンボル。今も時計台の鐘が時を告げる。',
-  'hakodate-yama': '標高334mの山。山頂から見る函館の夜景が有名で、ロープウェイで登れる。',
-  'chusonji': '奥州藤原氏ゆかりの寺。国宝の金色堂で知られ、「平泉」として世界遺産に登録されている。',
-  'zuiganji': '伊達政宗が再興した松島の名刹。本堂は国宝。日本三景・松島の観光とあわせて訪れたい。',
-  'nikko-toshogu': '徳川家康をまつる神社。陽明門や「見ざる・言わざる・聞かざる」の三猿で知られる世界遺産。',
-  'tokyo-tower': '1958年に完成した高さ333mの電波塔。展望台から東京の街を一望できる。',
-  'tokyo-skytree': '2012年に開業した高さ634mの電波塔。地上350mと450mに展望台がある。',
-  'sensoji': '都内最古とされる寺。雷門と仲見世通りで知られる浅草のシンボル。',
-  'meiji-jingu': '明治天皇と昭憲皇太后をまつる神社。都心とは思えない広い森に囲まれている。',
-  'kamakura-daibutsu': '高徳院にある国宝の阿弥陀如来坐像。高さ約11mの「鎌倉の大仏」。',
-  'yokohama-chinatown': '日本最大級の中華街。食べ歩きや関帝廟めぐりが楽しめる。',
-  'fuji-hongu-sengen': '全国の浅間神社の総本宮。富士山をご神体とし、境内の湧玉池の湧き水が美しい。',
-  'zenkoji': '宗派を問わず参拝できる長野の古刹。「一生に一度は善光寺参り」で知られる。',
-  'kenrokuen': '日本三名園の一つ。加賀藩前田家の大名庭園で、冬の雪吊りが有名。',
-  'shirakawago': '合掌造りの家々が残る世界遺産の集落。冬のライトアップも人気。',
-  'nagoya-castle': '金のしゃちほこで知られる城。復元された本丸御殿は見ごたえがある。',
-  'ise-naiku': '天照大御神をまつる伊勢神宮の内宮。五十鈴川に架かる宇治橋を渡って参拝する。',
-  'kinkakuji': '正式名は鹿苑寺。金箔に覆われた舎利殿が池に映る姿で知られる世界遺産。',
-  'kiyomizudera': '「清水の舞台」で知られる京都の寺。舞台から京都の街を見渡せる世界遺産。',
-  'fushimi-inari': '全国の稲荷神社の総本宮。山へと続く千本鳥居が有名。',
-  'todaiji': '「奈良の大仏」をまつる寺。大仏殿は世界最大級の木造建築。',
-  'osaka-castle': '豊臣秀吉が築いた城。今の天守閣の中は博物館になっている。',
-  'tsutenkaku': '大阪・新世界のシンボルタワー。足の裏をなでると御利益があるというビリケンさんが有名。',
-  'himeji-castle': '白く美しい姿から「白鷺城」と呼ばれる国宝の城。世界遺産。',
-  'izumo-taisha': '縁結びの神・大国主大神をまつる神社。大きなしめ縄で知られる。',
-  'okayama-korakuen': '日本三名園の一つ。岡山藩主池田家の庭園で、岡山城を借景にしている。',
-  'itsukushima-jinja': '海に浮かぶ大鳥居で知られる宮島の神社。世界遺産。',
-  'genbaku-dome': '1945年の原子爆弾の惨禍を今に伝える建物。世界遺産。平和記念公園とあわせて訪れたい。',
-  'dogo-onsen': '日本最古ともいわれる道後温泉のシンボル。重要文化財の木造の共同浴場。',
-  'kotohiragu': '「こんぴらさん」と呼ばれる海の神様の神社。本宮まで長い石段を上る。',
-  'katsurahama': '太平洋に面した高知の名勝。坂本龍馬の像が海を見つめている。',
-  'dazaifu-tenmangu': '学問の神様・菅原道真をまつる神社。合格祈願の参拝者が多い。',
-  'kumamoto-castle': '加藤清正が築いた名城。熊本地震からの復旧が進められている。',
-  'glover-garden': '長崎港を見下ろす丘に洋館が並ぶ。旧グラバー住宅は世界遺産の構成資産。',
-  'shurijo': '琉球王国の王城。正殿は2019年の火災で焼失し、復元工事が進められている。',
-  'churaumi': 'ジンベエザメが泳ぐ巨大水槽「黒潮の海」で知られる水族館。',
-  // 群馬県
-  'kusatsu-yubatake': '草津温泉の中心にある源泉。湯けむりが立ちのぼる湯畑と、夜のライトアップが名物。',
-  'kusatsu-sainokawara': 'あちこちから温泉が湧き出る公園。奥には大きな露天風呂もある。',
-  'ikaho-ishidangai': '伊香保温泉の石段の温泉街。365段の石段を上った先に伊香保神社がある。',
-  'shima-sekizenkan': '四万温泉の老舗旅館。赤い橋と古い建物は「千と千尋の神隠し」のモデルの一つといわれる。',
-  'hoshi-onsen': '明治創業の一軒宿。鹿鳴館風の建物の「法師乃湯」は、足元から湯が湧き出る。',
-  'takaragawa-onsen': '利根川の源流近くの温泉。川沿いに広がる大きな露天風呂で知られる。',
-  'tomioka-silk-mill': '明治5年に建てられた官営の製糸工場。世界遺産「富岡製糸場と絹産業遺産群」の中心。',
-  'usui-megane-bashi': '旧信越本線のレンガ造りのアーチ橋。廃線跡の遊歩道「アプトの道」で上を歩いて渡れる。',
-  'kanayama-castle': '戦国時代の山城の跡。石垣や池の跡が復元されている。日本100名城の一つ。',
-  'iwabitsu-castle': '真田氏ゆかりの山城の跡。岩櫃山のふもとに広がる。',
-  'rinkokaku': '明治時代に建てられた近代和風建築。国の重要文化財。',
-  'iwajuku-museum': '日本に旧石器時代があったことが初めて確かめられた岩宿遺跡の博物館。',
-  'haruna-jinja': '榛名山の山中にある神社。巨岩と杉並木の参道がパワースポットとして人気。',
-  'myogi-jinja': '妙義山のふもとの神社。江戸時代の豪華な社殿は国の重要文化財。',
-  'akagi-jinja': '赤城山の大沼に浮かぶ小鳥ヶ島の神社。朱色の啄木鳥橋が目印。',
-  'serada-toshogu': '徳川家康をまつる神社。日光東照宮から移された社殿が残る。',
-  'kiryu-tenmangu': '桐生の総鎮守。彫刻で飾られた社殿は群馬県の重要文化財。',
-  'shorinzan-darumaji': '縁起だるま発祥の寺。高崎だるまの本場で、境内にはだるまが並ぶ。',
-  'mizusawa-kannon': '坂東三十三観音の第十六番札所。門前には水沢うどんの店が並ぶ。',
-  'morinji': '「分福茶釜」の伝説が伝わる寺。参道にたぬきの置物がずらりと並ぶ。',
-  'takasaki-kannon': '高崎の観音山に立つ高さ約42mの白衣観音。胎内に入って上ることができる。',
-  'fukiware-falls': '「東洋のナイアガラ」と呼ばれる滝。川底の岩が割れたような独特の姿が見どころ。',
-  'hatomachi-toge': '尾瀬ヶ原へ向かう登山口。ここから木道を歩いて尾瀬の湿原へ下りる。',
-  'onioshidashi': '浅間山の噴火で流れ出た溶岩がつくった奇岩の景観。浅間山を間近に望む。',
-  'takatsudo-kyo': '渡良瀬川がつくった渓谷。はねたき橋から見る秋の紅葉が美しい。',
-  'tsutsujigaoka-park': '館林のつつじの名所。春には色とりどりのつつじが咲き誇る。',
-  'tambara-lavender': '標高約1,300mの高原に広がるラベンダー畑。夏が見ごろ。',
-  'gunma-flower-park': '赤城山のふもとにある花の公園。季節の花と温室が楽しめる。',
-  'gunma-pref-office': '高さ約150mの県庁舎。最上階の展望ホールから関東平野を一望できる。',
-  'lockheart-castle': 'スコットランドから移築された本物の古城。ドレスを着て撮影できる体験が人気。',
-  'yamba-dam': '2020年に完成したダム。ダムの見学や周辺の「やんば」エリアの観光が楽しめる。',
-  'usui-railway-village': '旧横川運転区の跡地にある鉄道のテーマパーク。数多くの車両を展示している。',
-  'kawaba-denen-plaza': '全国でも指折りの人気の道の駅。地ビールやパン、ヨーグルトなど川場村の味が楽しめる。',
-  'gunma-safari-park': '車に乗ったまま、動物を間近で見られるサファリパーク。',
-  'gunma-natural-history': '恐竜の全身骨格などを展示する自然史の博物館。',
-  'minakami-onsen': '利根川の上流に広がる温泉街。谷川岳やラフティングなど川遊びの拠点。',
-  'manza-onsen': '標高約1,800mの高原にある、硫黄の香る温泉。',
-  'oigami-onsen': '片品川沿いの温泉街。赤城山の大蛇と日光の大ムカデが戦った伝説が伝わる。',
-  'shiriyaki-onsen': '川底から温泉が湧き出る、川そのものが露天風呂になった野湯。',
-  'kawarayu-onsen': '八ッ場ダムの建設に伴って高台に移った温泉街。共同浴場「王湯」がある。',
-  'sarugakyo-onsen': '赤谷湖のほとりの温泉。上杉謙信の伝説が地名の由来とされる。',
-  'isobe-onsen': '温泉マーク「♨」発祥の地として知られる温泉。磯部せんべいが名物。',
-  'kakumanbuchi': '赤城山の大沼近くの小さな湿原。木道で一周でき、「小尾瀬」とも呼ばれる。',
-  'shoyokyo': '湯ノ小屋温泉の奥に続く渓谷。秋の紅葉の名所。',
-  'marunuma': '日光白根山のふもとにある静かな湖。周辺は丸沼高原のリゾート。',
-  'fujido-cave': '上野村にある大きな鍾乳洞。洞内を歩いて見学できる。',
-  'sanbaseki-kyo': '青みがかった「三波石」が川床に並ぶ渓谷。国の名勝・天然記念物。',
-  'agatsuma-kyo': '吾妻川が刻んだ渓谷。鹿飛橋のあたりは川幅が最も狭くなる景勝地。',
-  'okushima-lake': '四万川ダムでできた湖。「四万ブルー」と呼ばれる青い湖面が美しい。',
-  'aisai-no-oka': '嬬恋村の高原にある展望地。妻への愛を叫ぶ場所として知られる。',
-  'nukisaki-jinja': '上野国一之宮。参道を下った先に社殿がある珍しい「下り宮」。',
-  'nakanotake-jinja': '妙義山の岩山のふもとにある神社。巨大な大国様の像が目を引く。',
-  'kanmuri-inari': '太田市の稲荷神社。縁結びや子宝のご利益で知られ、ボケの花の名所。',
-  'itakura-raiden-jinja': '全国の雷電神社の総本宮。精巧な彫刻で飾られた社殿が見どころ。',
-  'kashozan-mirokuji': '迦葉山の中腹にある寺。日本一とされる大きな天狗の面がある。',
-  'hotokuji': '桐生の禅寺。磨かれた床に紅葉が映る「床もみじ」が人気。',
-  'tajima-yahei-house': '蚕の飼い方を改良した田島弥平の旧宅。世界遺産の構成資産。',
-  'takayamasha': '養蚕の技術を教えた高山長五郎の家と学校の跡。世界遺産の構成資産。',
-  'tago-hi': '奈良時代の石碑で、上野三碑の一つ。ユネスコ「世界の記憶」に登録されている。',
-  'hotoda-kofun': '5世紀の古墳が並ぶ史跡。八幡塚古墳は埴輪が並ぶ当時の姿に復元されている。',
-  'watanuki-kannonyama': '6世紀の前方後円墳。出土品は国宝で、石室の中に入って見学できる。',
-  'niijima-jo-house': '同志社の創立者・新島襄の両親が住んだ、安中藩の武家長屋。',
-  'tatebayashi-museum': '自然と人をテーマにした美術館。広い芝生の中に建つ建物も美しい。',
-  'hara-museum-arc': '伊香保近くの現代美術館。黒い木造の建物と広い芝生が印象的。',
-  'numata-castle': '真田氏ゆかりの沼田城の跡。今は公園になり、石垣や鐘楼が残る。',
-  'nagurumi-castle': '真田氏と北条氏が争った城の跡。豊臣秀吉の小田原攻めのきっかけになった。',
-  'kiryu-shinmachi': '織物で栄えた桐生の古い町並み。有鄰館はレンガ蔵などの建物群。重要伝統的建造物群保存地区。',
-  'akaiwa-village': '養蚕農家の家並みが残る山あいの集落。重要伝統的建造物群保存地区。',
-  'takumi-no-sato': '宿場の面影を残す町並みに工房が点在し、手作り体験ができる里。',
-  'gateau-festa-harada': 'ラスク「グーテ・デ・ロワ」で知られる洋菓子店の本館。神殿のような建物が目を引く。',
-  'konnyaku-park': 'こんにゃくの工場見学と、無料の試食バイキングが人気のテーマパーク。',
-  'gunma-kodomo-no-kuni': '金山のふもとにある大きな公園。長い滑り台や児童会館がある。',
-  'kronenberg': 'ドイツの農村をイメージした牧場のテーマパーク。動物とのふれあいやソーセージ作りが楽しめる。',
-  'kiryugaoka-zoo': '入園無料の動物園。となりには遊園地もある。',
-};
+// 観光地リストは spots.json から読み込む（起動時に読み込む。追加・修正は spots.json だけでよい）
+// 各観光地：{ id, type, name, pref, city, lat, lng, desc }。id は英数字とハイフンで、一度決めたら変えない（記録のキーになる）
+// 複数の県にまたがる観光地（三県境など）は prefs に全部の県、レア枠は rare: true
+const SPOTS_URL = 'spots.json';
+let SPOTS = [];
+const SPOT_DESC = {};   // id → 説明
+const spotIndex = {};   // id → 観光地
+const spotById = id => spotIndex[id];
+const spotPrefs = s => (s && (s.prefs || [s.pref])) || [];
+const XP_RARE_NEW = 150; // レア枠の観光地の初訪問（再訪は通常と同じ XP_SPOT_REVISIT）
 
 // 観光地の種類と地図のアイコン（観光地を追加するときは type をこの中から選ぶ）
 const SPOT_TYPES = {
@@ -620,10 +393,10 @@ map.createPane('me').style.zIndex = 650;
 const marker = L.circleMarker([0, 0], { pane: 'me', radius: 8, color: '#fff', weight: 3, fillColor: '#1e6f5c', fillOpacity: 1 });
 const accCircle = L.circle([0, 0], { radius: 0, color: '#1e6f5c', weight: 1, fillOpacity: 0.1 });
 
-// 観光地の印（種類ごとのアイコン。未訪問は紫の枠、訪問済みは灰色）
+// 観光地の印（種類ごとのアイコン。未訪問は紫の枠、訪問済みは灰色、レア枠は金の枠）
 function spotIcon(s, visited, fav) {
   return L.divIcon({
-    className: `spot-marker t-${s.type || 'other'}${visited ? ' visited' : ''}${fav ? ' fav' : ''}`,
+    className: `spot-marker t-${s.type || 'other'}${s.rare ? ' rare' : ''}${visited ? ' visited' : ''}${fav ? ' fav' : ''}`,
     html: `<span>${spotType(s).icon}</span>`,
     iconSize: [30, 30], iconAnchor: [15, 15], tooltipAnchor: [0, -15],
   });
@@ -639,9 +412,10 @@ const spotLayer = L.markerClusterGroup
       iconCreateFunction: cluster => {
         const ms = cluster.getAllChildMarkers();
         const allVisited = ms.every(m => m.visited);
+        const rareLeft = ms.some(m => m.rare && !m.visited); // 未訪問のレア枠が入っていたら金の縁
         const size = ms.length < 10 ? 34 : ms.length < 100 ? 40 : 46;
         return L.divIcon({
-          className: 'spot-cluster' + (allVisited ? ' visited' : ''),
+          className: 'spot-cluster' + (allVisited ? ' visited' : '') + (rareLeft ? ' rare' : ''),
           html: `<span>${ms.length}</span>`,
           iconSize: [size, size],
         });
@@ -651,19 +425,36 @@ const spotLayer = L.markerClusterGroup
 spotLayer.addTo(map);
 
 const spotMarkers = {};
-SPOTS.forEach(s => {
+function addSpotMarker(s) {
   // タップすると名前のフキダシ、フキダシをタップすると詳細カード
   const m = L.marker([s.lat, s.lng], { icon: spotIcon(s, false) })
-    .bindPopup(`<div class="spot-pop"><b>${spotType(s).icon} ${esc(s.name)}</b><span>タップで詳細 ›</span></div>`,
+    .bindPopup(`<div class="spot-pop"><b>${s.rare ? '✨ ' : ''}${spotType(s).icon} ${esc(s.name)}</b><span>タップで詳細 ›</span></div>`,
       { closeButton: false, offset: [0, -10], autoPanPadding: [20, 20] })
     .addTo(spotLayer);
   m.on('popupopen', e => {
     e.popup.getElement().querySelector('.spot-pop').onclick = () => { m.closePopup(); openSpotDetail(s.id); };
   });
-  m.visited = false; m.fav = false;
+  m.visited = false; m.fav = false; m.rare = !!s.rare;
   m.on('click', () => { if (demo) setPosition(s.lat, s.lng, 0, true); }); // テストモードではアイコンをタップするとその場所へ
   spotMarkers[s.id] = m;
-});
+}
+
+// spots.json を読み込む（起動時。失敗したら少し待って読み直す）
+let spotsRetry = 0;
+function loadSpots() {
+  fetch(SPOTS_URL, { cache: 'no-cache' })
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(d => {
+      SPOTS = (d.spots || []).filter(s => s && s.id && isFinite(s.lat) && isFinite(s.lng));
+      SPOTS.forEach(s => { spotIndex[s.id] = s; if (s.desc) SPOT_DESC[s.id] = s.desc; addSpotMarker(s); });
+      listDirty = true;
+      render();
+    })
+    .catch(e => {
+      console.warn('観光地データを読み込めませんでした', e);
+      setTimeout(loadSpots, Math.min(5000 * 2 ** spotsRetry++, 60000));
+    });
+}
 
 // ===== 駅（stations.json を必要になったときに読み込む） =====
 let STATIONS = null;              // [{ id, name, pref, city, lat, lng, lines:[路線id], p:[[lat,lng],…]? }]
@@ -959,7 +750,7 @@ $('spotCheckin').addEventListener('click', () => {
   const s = n.spot, v = state.spots[s.id];
   let gain, title;
   if (!v) {
-    gain = XP_SPOT_NEW; title = '📸 観光地に到着！';
+    gain = s.rare ? XP_RARE_NEW : XP_SPOT_NEW; title = s.rare ? '✨ レアスポット発見！' : '📸 観光地に到着！';
     state.spots[s.id] = { name: s.name, pref: s.pref, city: s.city || '', first: today(), last: today(), count: 1 };
   } else {
     gain = XP_SPOT_REVISIT; title = 'また来ました';
@@ -995,13 +786,14 @@ function renderSpots() {
   if (n && n.dist <= SPOT_RADIUS_M) {
     const v = state.spots[n.spot.id], block = spotBlock(n);
     box.hidden = false; hint.textContent = '';
-    $('spotName').textContent = `${spotType(n.spot).icon} ${n.spot.name}`;
+    $('spotName').textContent = `${n.spot.rare ? '✨ ' : ''}${spotType(n.spot).icon} ${n.spot.name}`;
+    box.classList.toggle('rare', !!n.spot.rare);
     $('spotStatus').innerHTML = v
       ? `<span class="status old">訪問済み ${v.count}回</span>`
       : '<span class="status new">未訪問！</span>';
-    $('spotSub').textContent = `${spotType(n.spot).label}・ここから ${fmtDist(n.dist)}`;
+    $('spotSub').textContent = `${n.spot.rare ? 'レアスポット・' : ''}${spotType(n.spot).label}・ここから ${fmtDist(n.dist)}`;
     $('spotCheckin').disabled = !!block;
-    $('spotCheckin').textContent = block || `観光地チェックイン +${v ? XP_SPOT_REVISIT : XP_SPOT_NEW} XP`;
+    $('spotCheckin').textContent = block || `観光地チェックイン +${v ? XP_SPOT_REVISIT : n.spot.rare ? XP_RARE_NEW : XP_SPOT_NEW} XP`;
   } else {
     box.hidden = true;
     hint.textContent = n && n.dist <= SPOT_HINT_M
@@ -1094,7 +886,7 @@ function muniByPref() {
 function prefStats(p) {
   const mb = muniByPref();
   const muniVisited = Object.values(state.visited).filter(v => v.pref === p).length;
-  const spots = SPOTS.filter(s => s.pref === p);
+  const spots = SPOTS.filter(s => spotPrefs(s).includes(p));
   const sts = STATIONS ? STATIONS.filter(s => s.pref === p) : null;
   return {
     muni: [muniVisited, mb && mb[p] ? mb[p].length : null],
@@ -1189,7 +981,7 @@ const VIEWS = {
     })) };
   },
   prefSpots(p) {
-    const list = SPOTS.filter(s => s.pref === p).sort((a, b) => (state.spots[b.id] ? 1 : 0) - (state.spots[a.id] ? 1 : 0));
+    const list = SPOTS.filter(s => spotPrefs(s).includes(p)).sort((a, b) => (state.spots[b.id] ? 1 : 0) - (state.spots[a.id] ? 1 : 0));
     const n = list.filter(s => state.spots[s.id]).length;
     return { title: `${p}の観光地`, html: `<div class="sec-h">${cNum(n, list.length)}　タップで詳細</div>` +
       items(list.map(s => spotItem(s, state.spots[s.id]))) };
@@ -1221,11 +1013,13 @@ const VIEWS = {
   favs(filter) {
     filter = filter || 'all';
     const ids = Object.keys(state.favs).filter(id => spotById(id) || state.spots[id]);
-    const prefOf = id => (spotById(id) || state.spots[id]).pref || 'その他';
-    const prefs = [...new Set(ids.map(prefOf))].sort((a, b) => prefRank(a) - prefRank(b));
+    // 複数県にまたがる観光地（三県境など）は、それぞれの県に出す
+    const prefsOf = id => { const s = spotById(id); return s ? spotPrefs(s) : [(state.spots[id] && state.spots[id].pref) || 'その他']; };
+    const prefOf = id => prefsOf(id).join('・');
+    const prefs = [...new Set(ids.flatMap(prefsOf))].sort((a, b) => prefRank(a) - prefRank(b));
     const chips = `<div class="chips"><button class="chip${filter === 'all' ? ' on' : ''}" data-filter="all">すべて（${ids.length}）</button>` +
-      prefs.map(p => `<button class="chip${filter === p ? ' on' : ''}" data-filter="${esc(p)}">${esc(p)}（${ids.filter(id => prefOf(id) === p).length}）</button>`).join('') + '</div>';
-    const shown = ids.filter(id => filter === 'all' || prefOf(id) === filter).sort((a, b) => state.favs[a] < state.favs[b] ? 1 : -1);
+      prefs.map(p => `<button class="chip${filter === p ? ' on' : ''}" data-filter="${esc(p)}">${esc(p)}（${ids.filter(id => prefsOf(id).includes(p)).length}）</button>`).join('') + '</div>';
+    const shown = ids.filter(id => filter === 'all' || prefsOf(id).includes(filter)).sort((a, b) => state.favs[a] < state.favs[b] ? 1 : -1);
     if (!ids.length) return { title: '⭐ お気に入り一覧', html: '<div class="empty">お気に入りはまだありません。<br>観光地の詳細カードで「☆ お気に入り」を押すと登録できます。</div>' };
     return { title: '⭐ お気に入り一覧', html: chips + items(shown.map(id => {
       const s = spotById(id), v = state.spots[id];
@@ -1337,16 +1131,16 @@ function openSpotDetail(id) {
   if (!s && !v) return;
   const t = spotType(s);
   $('dIcon').textContent = t.icon;
-  $('dIcon').className = 'detail-icon t-' + ((s && s.type) || 'other');
+  $('dIcon').className = 'detail-icon t-' + ((s && s.type) || 'other') + (s && s.rare ? ' rare' : '');
   $('dName').textContent = s ? s.name : v.name;
-  const pref = (s && s.pref) || (v && v.pref) || '', city = (s && s.city) || (v && v.city) || '';
-  $('dType').textContent = [t.label, (pref + ' ' + city).trim()].filter(Boolean).join('・');
+  const pref = s ? spotPrefs(s).join('・') : (v && v.pref) || '', city = (s && s.city) || (v && v.city) || '';
+  $('dType').textContent = [s && s.rare ? '✨ レアスポット' : '', t.label, (pref + ' ' + city).trim()].filter(Boolean).join('・');
   $('dDesc').textContent = SPOT_DESC[id] || '説明はまだありません。';
   $('dStatus').textContent = v ? '✅ 訪問済み' : '未訪問';
   $('dFirst').textContent = v ? v.first : '未訪問';
   $('dLast').textContent = v ? v.last : '―';
   $('dCount').textContent = `${v ? v.count : 0}回`;
-  $('dXp').textContent = `${spotXp(v)} XP`;
+  $('dXp').textContent = `${spotXp(s, v)} XP`;
   renderFavButton(id);
   // 思い出メモ（訪問済みの観光地だけ書ける）
   detailId = id;
@@ -1388,7 +1182,7 @@ $('dFav').addEventListener('click', () => {
 });
 
 // この観光地でこれまでに得たXP（初訪問 + 再訪の回数分）
-const spotXp = v => v ? XP_SPOT_NEW + (v.count - 1) * XP_SPOT_REVISIT : 0;
+const spotXp = (s, v) => v ? (s && s.rare ? XP_RARE_NEW : XP_SPOT_NEW) + (v.count - 1) * XP_SPOT_REVISIT : 0;
 
 // 思い出メモは入力するたびに少し待って自動保存する
 let detailId = null, memoTimer = null;
@@ -1589,6 +1383,7 @@ $('reset').addEventListener('click', () => {
 
 render();
 renderBackupInfo();
+loadSpots();
 startWatch();
 </script>
 </body>
