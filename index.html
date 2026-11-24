@@ -146,7 +146,8 @@
   .fav-btn.on { background:#fff6d6; }
   .spot-marker.fav::after { content:'★'; position:absolute; right:-6px; top:-7px; font-size:13px; color:#f0b400;
     text-shadow:0 0 2px #fff, 0 0 2px #fff; filter:none; }
-  .spot-marker { position:relative; }
+  /* 注意：.spot-marker に position を指定しないこと。Leaflet のアイコンは position:absolute で置かれていて、
+     relative などで上書きすると、表示中のアイコンの数に応じて位置がずれる（★の ::after は absolute のままで正しく付く） */
   /* 駅の案内カード */
   .spot.st { border-color:#1F5FB0; background:#eef4fc; }
   .spot.st .spot-name { color:#1F5FB0; }
@@ -409,6 +410,7 @@ const spotLayer = L.markerClusterGroup
       maxClusterRadius: 25,          // この画面上の距離（px）以内の印をまとめる（小さいほどまとめにくい。多少の重なりは許す）
       disableClusteringAtZoom: 12,   // ここまで拡大したら全部ばらして表示する
       showCoverageOnHover: false,
+      animate: false,                // まとめる／ばらす時のアニメーションなし（途中の位置がズレて見えるのを防ぎ、スマホでも軽く）
       spiderfyOnMaxZoom: false,
       iconCreateFunction: cluster => {
         const ms = cluster.getAllChildMarkers();
