@@ -407,8 +407,8 @@ function spotIcon(s, visited, fav) {
 // 読み込みに失敗したときは、まとめずにそのまま地図に置く
 const spotLayer = L.markerClusterGroup
   ? L.markerClusterGroup({
-      maxClusterRadius: 25,          // この画面上の距離（px）以内の印をまとめる（小さいほどまとめにくい。多少の重なりは許す）
-      disableClusteringAtZoom: 12,   // ここまで拡大したら全部ばらして表示する
+      maxClusterRadius: 18,          // この画面上の距離（px）以内の印をまとめる（小さいほどまとめにくい。多少の重なりは許す）
+      disableClusteringAtZoom: 11,   // ここまで拡大したら全部ばらして表示する
       showCoverageOnHover: false,
       animate: false,                // まとめる／ばらす時のアニメーションなし（途中の位置がズレて見えるのを防ぎ、スマホでも軽く）
       spiderfyOnMaxZoom: false,
