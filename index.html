@@ -214,9 +214,6 @@
     display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:800; color:#5a32a3; line-height:1; }
   .michi-marker.visited { border:3px solid #7cb342; background:#f3fae9; color:#33691e; }
   .michi-marker.today { opacity:.5; }
-  .michi-marker .michi-stamp { display:none; }
-  .michi-marker.visited .michi-stamp { display:flex; position:absolute; right:-8px; bottom:-8px; width:16px; height:16px; border-radius:50%;
-    border:2px solid #c62828; color:#c62828; background:#fff; font-size:9px; font-style:normal; font-weight:800; align-items:center; justify-content:center; }
   .michi-marker.fav::after { content:'★'; position:absolute; right:-6px; top:-7px; font-size:13px; color:#f0b400; text-shadow:0 0 2px #fff, 0 0 2px #fff; }
   .michi-cluster { background:#7b4fc9; color:#fff; border:3px solid rgba(255,255,255,.9); border-radius:9px;
     box-shadow:0 1px 5px rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px; }
@@ -374,7 +371,7 @@ const RETRY_MAX_MS = 120000; // 再試行間隔の上限
 const STORE_KEY = 'tabilog-v1';
 const BACKUP_KEY = 'tabilog-last-backup'; // 最後にファイルへ保存した日
 const XP_SPOT_NEW = 50;      // 初めての観光地
-const XP_SPOT_REVISIT = 5;   // 観光地の再訪（1日1回）
+const XP_SPOT_REVISIT = 20;  // 観光地の再訪（1日1回。2026-11-25 に 5 → 20）
 const SPOT_RADIUS_M = 200;   // 観光地からこの距離以内ならチェックインできる
 const SPOT_HINT_M = 10000;   // この距離以内の観光地は「近くの観光地」として案内する
 const XP_STATION_NEW = 20;      // 初めての駅
@@ -407,7 +404,7 @@ const XP_RARE_NEW = 150; // レア枠の観光地の初訪問（再訪は通常�
 // ===== 道の駅（spots.json の michi に入っている。観光地を兼ねる道の駅は spot に観光地の id を持つ） =====
 // 観光地を兼ねる道の駅は、観光地としてチェックインする（XPも観光地のまま）。コンプリート一覧では観光地と道の駅の両方に数える
 const XP_MICHI_NEW = 30;        // 初めての道の駅（暫定）
-const XP_MICHI_REVISIT = 3;     // 道の駅の再訪（1日1回）
+const XP_MICHI_REVISIT = 10;    // 道の駅の再訪（1日1回。2026-11-25 に 3 → 10）
 const MICHI_RADIUS_M = 150;     // 道の駅からこの距離以内ならチェックインできる
 const SHOW_MICHI_KEY = 'tabilog-show-michi'; // 道の駅の表示ON/OFF（この端末だけの設定）
 let MICHI = [];                 // [{ id, name, pref, city, lat, lng, spot?, desc? }]
@@ -560,11 +557,11 @@ function addSpotMarker(s) {
   spotMarkers[s.id] = m;
 }
 
-// ===== 道の駅の印（角丸の四角に「道」。未訪問は紫のふち、訪問済みは黄緑のふちと朱色の「済」の判子、今日訪問したものは半透明） =====
+// ===== 道の駅の印（角丸の四角に「道」。未訪問は紫のふち、訪問済みは黄緑のふち、今日訪問したものは半透明） =====
 function michiIcon(visited, todayVisited, fav) {
   return L.divIcon({
     className: `michi-marker${visited ? ' visited' : ''}${todayVisited ? ' today' : ''}${fav ? ' fav' : ''}`,
-    html: '<span>道</span><i class="michi-stamp">済</i>',
+    html: '<span>道</span>',
     iconSize: [30, 30], iconAnchor: [15, 15],
   });
 }
@@ -596,6 +593,33 @@ function addMichiMarker(m) {
   michiMarkers[m.id] = mk;
 }
 
+// あとから観光地兼道の駅にした道の駅（例：まえばし赤城）に、道の駅として記録があれば観光地の記録へ移す
+// （観光地兼道の駅は観光地の記録で数えるため。観光地の記録がすでにあれば、回数の多い方・日付の広い方にまとめる）
+function migrateDualMichi() {
+  const st = demo ? realState : state;
+  if (!st) return;
+  let changed = false;
+  MICHI.forEach(m => {
+    if (!m.spot || !st.michi[m.id]) return;
+    const mv = st.michi[m.id], sv = st.spots[m.spot], s = spotById(m.spot);
+    if (!sv) {
+      st.spots[m.spot] = Object.assign({}, mv, { name: s ? s.name : mv.name, city: (s && s.city) || mv.city || '' });
+    } else {
+      sv.first = sv.first < mv.first ? sv.first : mv.first;
+      sv.last = sv.last > mv.last ? sv.last : mv.last;
+      sv.count = Math.max(sv.count, mv.count);
+      if (!sv.memo && mv.memo) sv.memo = mv.memo;
+    }
+    delete st.michi[m.id];
+    if (st.favs[m.id]) { if (!st.favs[m.spot]) st.favs[m.spot] = st.favs[m.id]; delete st.favs[m.id]; }
+    changed = true;
+  });
+  if (changed) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(st)); } catch (e) {}
+    listDirty = true;
+  }
+}
+
 // spots.json を読み込む（起動時。失敗したら少し待って読み直す）
 let spotsRetry = 0;
 function loadSpots() {
@@ -607,6 +631,7 @@ function loadSpots() {
       // 道の駅（観光地を兼ねるものは観光地の印を使うので、道の駅の印は置かない）
       MICHI = (d.michi || []).filter(m => m && m.id && isFinite(m.lat) && isFinite(m.lng));
       MICHI.forEach(m => { michiIndex[m.id] = m; if (m.desc) SPOT_DESC[m.id] = m.desc; if (!m.spot) addMichiMarker(m); });
+      migrateDualMichi();
       if (MICHI.length) map.attributionControl.addAttribution('道の駅：<a href="https://nlftp.mlit.go.jp/ksj/" target="_blank">国土数値情報（道の駅データ）</a>を加工・© OpenStreetMap contributors');
       listDirty = true;
       render();
