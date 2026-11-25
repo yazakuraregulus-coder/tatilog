@@ -52,6 +52,9 @@
   .spot-marker.t-temple span { color:#b3261e; font-weight:700; font-size:17px; }
   /* 訪問済み：アイコンは元の色のまま、ふちを黄緑に */
   .spot-marker.visited { border:3px solid #7cb342; background:#f3fae9; }
+  .spot-marker.today { opacity:.5; }  /* 今日訪問した観光地は半透明（日付が変わると元に戻る） */
+  /* 駅の層（SVG）は余白のタップを下の観光地アイコンへ通す。駅の丸（path.leaflet-interactive）だけがタップを受ける */
+  .leaflet-stations-pane > svg { pointer-events:none; }
   .spot-cluster { background:#7b4fc9; color:#fff; border:3px solid rgba(255,255,255,.9); border-radius:50%;
     box-shadow:0 1px 5px rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center;
     font-weight:700; font-size:14px; }
@@ -312,7 +315,7 @@ const SPOT_HINT_M = 10000;   // この距離以内の観光地は「近くの観
 const XP_STATION_NEW = 20;      // 初めての駅
 const XP_STATION_REVISIT = 2;   // 駅の再訪（1日1回）
 const STATION_RADIUS_M = 150;   // 駅（ホーム）からこの距離以内ならチェックインできる
-const STATION_MIN_ZOOM = 13;    // ここまで拡大したときだけ地図に駅を表示する
+const STATION_MIN_ZOOM = 12;    // ここまで拡大したときだけ地図に駅を表示する
 const STATIONS_URL = 'stations.json';            // 駅データ（必要になったときに読み込む）
 const SHOW_STATIONS_KEY = 'tabilog-show-stations'; // 駅の表示ON/OFF（この端末だけの設定）
 const MAX_SPEED_KMH = 10;       // 観光地・駅は、これより速く動いているとチェックインできない（電車での通過を防ぐ）
@@ -396,15 +399,16 @@ L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
   maxZoom: 18,
   attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>'
 }).addTo(map);
-// 現在地の点は観光地のアイコンより上に出す
+// 重なり順：観光地のアイコン（markerPane 600）＜ 駅の点（stations 640）＜ 現在地の点（me 650）＜ フキダシ（700）
+map.createPane('stations').style.zIndex = 640;
 map.createPane('me').style.zIndex = 650;
 const marker = L.circleMarker([0, 0], { pane: 'me', radius: 8, color: '#fff', weight: 3, fillColor: '#1e6f5c', fillOpacity: 1 });
 const accCircle = L.circle([0, 0], { radius: 0, color: '#1e6f5c', weight: 1, fillOpacity: 0.1 });
 
-// 観光地の印（種類ごとのアイコン。未訪問は紫の枠、訪問済みは灰色、レア枠は金の枠）
-function spotIcon(s, visited, fav) {
+// 観光地の印（種類ごとのアイコン。未訪問は紫のふち、訪問済みは黄緑のふち、今日訪問したものは半透明、レア枠は金の枠）
+function spotIcon(s, visited, fav, todayVisited) {
   return L.divIcon({
-    className: `spot-marker t-${s.type || 'other'}${s.rare ? ' rare' : ''}${visited ? ' visited' : ''}${fav ? ' fav' : ''}`,
+    className: `spot-marker t-${s.type || 'other'}${s.rare ? ' rare' : ''}${visited ? ' visited' : ''}${todayVisited ? ' today' : ''}${fav ? ' fav' : ''}`,
     html: `<span>${spotType(s).icon}</span>`,
     iconSize: [30, 30], iconAnchor: [15, 15], tooltipAnchor: [0, -15],
   });
@@ -443,7 +447,7 @@ function addSpotMarker(s) {
   m.on('popupopen', e => {
     e.popup.getElement().querySelector('.spot-pop').onclick = () => { m.closePopup(); openSpotDetail(s.id); };
   });
-  m.visited = false; m.fav = false; m.rare = !!s.rare;
+  m.visited = false; m.fav = false; m.todayVisited = false; m.rare = !!s.rare;
   m.on('click', () => { if (demo) setPosition(s.lat, s.lng, 0, true); }); // テストモードではアイコンをタップするとその場所へ
   spotMarkers[s.id] = m;
 }
@@ -494,9 +498,10 @@ const stationColor = st => (lineIndex[st.lines[0]] || {}).color || '#555';
 const lineChips = st => st.lines.map(id => lineIndex[id])
   .filter(Boolean).map(l => `<span class="line-chip"><i style="background:${esc(l.color)}"></i>${esc(l.label)}</span>`).join('');
 
-// 駅の点は数が多いので、軽い canvas で「路線の色の小さな丸」として描く。
+// 駅の点は「路線の色の小さな丸」として、観光地のアイコンより上の層（stations）に SVG で描く。
+// canvas だと層全体が1枚の板になり、下の観光地アイコンがタップできなくなるため SVG にしている（SVG の余白はタップを通す。CSS参照）。
 // 拡大したとき（STATION_MIN_ZOOM 以上）に、画面に入っている駅だけ描く
-const stationRenderer = L.canvas({ padding: 0.3 });
+const stationRenderer = L.svg({ pane: 'stations', padding: 0.3 });
 const stationLayer = L.layerGroup().addTo(map);
 let showStations = true;
 try { showStations = localStorage.getItem(SHOW_STATIONS_KEY) !== '0'; } catch (e) {}
@@ -509,9 +514,10 @@ function refreshStationLayer() {
   STATIONS.forEach(st => {
     if (!b.contains([st.lat, st.lng])) return;
     const v = state.stations[st.id], color = stationColor(st);
+    const alpha = v && v.last === today() ? 0.45 : 1; // 今日訪問した駅は半透明（日付が変わると元に戻る）
     // 未訪問：路線の色で塗りつぶし ／ 訪問済み：白抜き（路線の色の太い縁）
     const m = L.circleMarker([st.lat, st.lng], v
-      ? { renderer: stationRenderer, radius: 6, color, weight: 3, fillColor: '#fff', fillOpacity: 1, bubblingMouseEvents: false }
+      ? { renderer: stationRenderer, radius: 6, color, weight: 3, fillColor: '#fff', opacity: alpha, fillOpacity: alpha, bubblingMouseEvents: false }
       : { renderer: stationRenderer, radius: 6, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1, bubblingMouseEvents: false });
     m.bindPopup(`<div class="st-pop"><b>🚉 ${esc(st.name)}駅</b><div>${lineChips(st)}</div>` +
       `<span>${v ? `✅ 訪問済み ${v.count}回` : '未訪問'}</span></div>`, { closeButton: false, offset: [0, -4] });
@@ -782,9 +788,11 @@ function renderSpots() {
   // 地図の印（訪問済みかどうかが変わったものだけ描き直す）
   const changed = [];
   SPOTS.forEach(s => {
-    const m = spotMarkers[s.id], visited = !!state.spots[s.id];
-    const fav = !!state.favs[s.id];
-    if (m.visited !== visited || m.fav !== fav) { m.setIcon(spotIcon(s, visited, fav)); m.visited = visited; m.fav = fav; changed.push(m); }
+    const m = spotMarkers[s.id], v = state.spots[s.id], visited = !!v;
+    const fav = !!state.favs[s.id], todayVisited = !!v && v.last === today(); // 日付が変わると次の描画で元に戻る
+    if (m.visited !== visited || m.fav !== fav || m.todayVisited !== todayVisited) {
+      m.setIcon(spotIcon(s, visited, fav, todayVisited)); m.visited = visited; m.fav = fav; m.todayVisited = todayVisited; changed.push(m);
+    }
   });
   // まとめた丸の色（全部訪問済みなら灰色）も描き直す
   if (changed.length && spotLayer.refreshClusters) spotLayer.refreshClusters(changed);
@@ -931,7 +939,7 @@ const lineChip = l => `<span class="line-chip"><i style="background:${esc(l.colo
 // 観光地の行（タップで詳細カード）
 const spotItem = (s, v) => item({
   mark: v ? '✅' : '・', todo: !v, attrs: `data-spot="${esc(s.id)}"`,
-  name: `${spotType(s).icon} ${esc(s.name)}${state.favs[s.id] ? ' <span style="color:#f0b400">★</span>' : ''}${v && v.memo ? ' 📝' : ''}`,
+  name: `${spotType(s).icon} ${esc(s.name)}${s.rare ? ' ✨' : ''}${state.favs[s.id] ? ' <span style="color:#f0b400">★</span>' : ''}${v && v.memo ? ' 📝' : ''}`,
   sub: esc([spotType(s).label, s.city].filter(Boolean).join('・')), right: visitRight(v),
 });
 // 駅の行（タップで地図をその駅へ）
@@ -1264,7 +1272,8 @@ function render() {
   if (listDirty) { if (!$('page').hidden) renderPage(true); listDirty = false; }
 
   // 駅の点（訪問済みは白抜き）は、駅の記録が変わったときだけ描き直す
-  const sig = demo + ':' + Object.keys(state.stations).join(',');
+  // （今日訪問した駅の半透明も含めるので、日付と「今日訪問したか」も比べる）
+  const sig = demo + ':' + today() + ':' + Object.entries(state.stations).map(([id, v]) => id + (v.last === today() ? '*' : '')).join(',');
   if (sig !== stationSig) { stationSig = sig; refreshStationLayer(); }
 }
 
@@ -1402,6 +1411,9 @@ render();
 renderBackupInfo();
 loadSpots();
 startWatch();
+// 日付が変わったら描き直す（「今日訪問した」半透明の表示や「今日はチェックイン済み」を元に戻すため。止まっていてGPSの更新が無いときのため）
+let shownDay = today();
+setInterval(() => { if (today() !== shownDay) { shownDay = today(); listDirty = true; render(); } }, 60000);
 </script>
 </body>
 </html>
