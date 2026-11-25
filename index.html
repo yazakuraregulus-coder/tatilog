@@ -181,6 +181,26 @@
   .spot.st .spot-name { color:#1F5FB0; }
   .spot.st .status.new { background:#d6e4f7; color:#1F5FB0; }
   #stCheckin { width:100%; background:#1F5FB0; color:#fff; font-size:16px; font-weight:700; }
+  /* 道の駅の案内カード（道路標識の緑） */
+  .spot.mc { border-color:#3B6D11; background:#eff6e7; }
+  .spot.mc .spot-name { color:#2f5a0d; }
+  .spot.mc .status.new { background:#dcebc7; color:#2f5a0d; }
+  #mcCheckin { width:100%; background:#3B6D11; color:#fff; font-size:16px; font-weight:700; }
+  #mcCheckin:disabled { background:#c9cfcc; }
+  /* 道の駅の地図の印（角丸の四角。観光地の丸と形で見分ける。※ position は指定しない） */
+  .michi-marker { background:#fff; border:2px solid #7b4fc9; border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,.35);
+    display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:800; color:#5a32a3; line-height:1; }
+  .michi-marker.visited { border:3px solid #7cb342; background:#f3fae9; color:#33691e; }
+  .michi-marker.today { opacity:.5; }
+  .michi-marker .michi-stamp { display:none; }
+  .michi-marker.visited .michi-stamp { display:flex; position:absolute; right:-8px; bottom:-8px; width:16px; height:16px; border-radius:50%;
+    border:2px solid #c62828; color:#c62828; background:#fff; font-size:9px; font-style:normal; font-weight:800; align-items:center; justify-content:center; }
+  .michi-marker.fav::after { content:'★'; position:absolute; right:-6px; top:-7px; font-size:13px; color:#f0b400; text-shadow:0 0 2px #fff, 0 0 2px #fff; }
+  .michi-cluster { background:#7b4fc9; color:#fff; border:3px solid rgba(255,255,255,.9); border-radius:9px;
+    box-shadow:0 1px 5px rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px; }
+  .michi-cluster.visited { background:#7cb342; }
+  .map-toggle.michi-toggle { color:#3B6D11; }
+  .detail-icon.michi { border-radius:10px; font-size:22px; }
   #stCheckin:disabled { background:#c9cfcc; }
   .st-lines { margin-top:2px; }
   .line-chip { display:inline-flex; align-items:center; gap:3px; font-size:11px; margin:2px 6px 0 0; white-space:nowrap; }
@@ -239,6 +259,11 @@
     <div><span id="spotName" class="spot-name"></span><span id="spotStatus"></span></div>
     <div id="spotSub" class="spot-sub"></div>
     <button id="spotCheckin">観光地チェックイン</button>
+  </div>
+  <div id="mcBox" class="spot mc" hidden>
+    <div><span id="mcName" class="spot-name"></span><span id="mcStatus"></span></div>
+    <div id="mcSub" class="spot-sub"></div>
+    <button id="mcCheckin">道の駅チェックイン</button>
   </div>
   <div id="stBox" class="spot st" hidden>
     <div><span id="stName" class="spot-name"></span><span id="stStatus"></span></div>
@@ -359,6 +384,20 @@ const spotById = id => spotIndex[id];
 const spotPrefs = s => (s && (s.prefs || [s.pref])) || [];
 const XP_RARE_NEW = 150; // レア枠の観光地の初訪問（再訪は通常と同じ XP_SPOT_REVISIT）
 
+// ===== 道の駅（spots.json の michi に入っている。観光地を兼ねる道の駅は spot に観光地の id を持つ） =====
+// 観光地を兼ねる道の駅は、観光地としてチェックインする（XPも観光地のまま）。コンプリート一覧では観光地と道の駅の両方に数える
+const XP_MICHI_NEW = 30;        // 初めての道の駅（暫定）
+const XP_MICHI_REVISIT = 3;     // 道の駅の再訪（1日1回）
+const MICHI_RADIUS_M = 150;     // 道の駅からこの距離以内ならチェックインできる
+const SHOW_MICHI_KEY = 'tabilog-show-michi'; // 道の駅の表示ON/OFF（この端末だけの設定）
+let MICHI = [];                 // [{ id, name, pref, city, lat, lng, spot?, desc? }]
+const michiIndex = {};
+const michiById = id => michiIndex[id];
+const isMichiId = id => typeof id === 'string' && id.startsWith('michi-');
+const MICHI_TYPE = { icon: '🚗', label: '道の駅' };
+// 道の駅の記録（観光地を兼ねる道の駅は、観光地の記録を見る）
+const michiRec = m => m.spot ? state.spots[m.spot] : state.michi[m.id];
+
 // 観光地の種類と地図のアイコン（観光地を追加するときは type をこの中から選ぶ）
 const SPOT_TYPES = {
   shrine:   { icon: '⛩️', label: '神社' },
@@ -387,7 +426,8 @@ function load() {
   s = s || { xp: 0, visited: {} };
   s.spots = s.spots || {}; // 観光地の記録（古いデータには無いので補う）
   s.stations = s.stations || {}; // 駅の記録（同上）
-  s.favs = s.favs || {};         // お気に入りの観光地 { 観光地id: 登録した日 }
+  s.michi = s.michi || {};       // 道の駅の記録（観光地を兼ねる道の駅は spots 側に記録する）
+  s.favs = s.favs || {};         // お気に入りの観光地・道の駅 { id: 登録した日 }
   if (!Array.isArray(s.log)) s.log = legacyLog(s); // チェックインの履歴（無ければ今までの記録から作る）
   return s;
 }
@@ -397,6 +437,7 @@ function legacyLog(s) {
   Object.values(s.visited || {}).forEach(v => log.push({ type: 'muni', id: v.pref + '/' + v.city, name: v.city, pref: v.pref, at: v.last }));
   Object.entries(s.spots || {}).forEach(([id, v]) => log.push({ type: 'spot', id, name: v.name, pref: v.pref || '', at: v.last }));
   Object.entries(s.stations || {}).forEach(([id, v]) => log.push({ type: 'station', id, name: v.name, pref: v.pref || '', at: v.last }));
+  Object.entries(s.michi || {}).forEach(([id, v]) => log.push({ type: 'michi', id, name: v.name, pref: v.pref || '', at: v.last }));
   return log.sort((a, b) => a.at < b.at ? -1 : 1);
 }
 const LOG_MAX = 500; // 履歴は新しい500件まで残す
@@ -472,6 +513,42 @@ function addSpotMarker(s) {
   spotMarkers[s.id] = m;
 }
 
+// ===== 道の駅の印（角丸の四角に「道」。未訪問は紫のふち、訪問済みは黄緑のふちと朱色の「済」の判子、今日訪問したものは半透明） =====
+function michiIcon(visited, todayVisited, fav) {
+  return L.divIcon({
+    className: `michi-marker${visited ? ' visited' : ''}${todayVisited ? ' today' : ''}${fav ? ' fav' : ''}`,
+    html: '<span>道</span><i class="michi-stamp">済</i>',
+    iconSize: [30, 30], iconAnchor: [15, 15],
+  });
+}
+// 近くにある道の駅は、観光地とは別の四角い丸にまとめる
+const michiLayer = L.markerClusterGroup
+  ? L.markerClusterGroup({
+      maxClusterRadius: 18, disableClusteringAtZoom: 11, showCoverageOnHover: false, spiderfyOnMaxZoom: false, animate: false,
+      iconCreateFunction: cluster => {
+        const ms = cluster.getAllChildMarkers();
+        return L.divIcon({ className: 'michi-cluster' + (ms.every(m => m.visited) ? ' visited' : ''),
+          html: `<span>${ms.length}</span>`, iconSize: [32, 32] });
+      },
+    })
+  : L.layerGroup();
+let showMichi = true;
+try { showMichi = localStorage.getItem(SHOW_MICHI_KEY) !== '0'; } catch (e) {}
+if (showMichi) michiLayer.addTo(map);
+const michiMarkers = {};
+function addMichiMarker(m) {
+  const mk = L.marker([m.lat, m.lng], { icon: michiIcon(false, false, false) })
+    .bindPopup(`<div class="spot-pop"><b>🚗 ${esc(m.name)}</b><span>タップで詳細 ›</span></div>`,
+      { closeButton: false, offset: [0, -10], autoPanPadding: [20, 20] })
+    .addTo(michiLayer);
+  mk.on('popupopen', e => {
+    e.popup.getElement().querySelector('.spot-pop').onclick = () => { mk.closePopup(); openSpotDetail(m.id); };
+  });
+  mk.visited = false; mk.todayVisited = false; mk.fav = false;
+  mk.on('click', () => { if (demo) setPosition(m.lat, m.lng, 0, true); }); // テストモードではタップした道の駅にいることにする
+  michiMarkers[m.id] = mk;
+}
+
 // spots.json を読み込む（起動時。失敗したら少し待って読み直す）
 let spotsRetry = 0;
 function loadSpots() {
@@ -480,6 +557,10 @@ function loadSpots() {
     .then(d => {
       SPOTS = (d.spots || []).filter(s => s && s.id && isFinite(s.lat) && isFinite(s.lng));
       SPOTS.forEach(s => { spotIndex[s.id] = s; if (s.desc) SPOT_DESC[s.id] = s.desc; addSpotMarker(s); });
+      // 道の駅（観光地を兼ねるものは観光地の印を使うので、道の駅の印は置かない）
+      MICHI = (d.michi || []).filter(m => m && m.id && isFinite(m.lat) && isFinite(m.lng));
+      MICHI.forEach(m => { michiIndex[m.id] = m; if (m.desc) SPOT_DESC[m.id] = m.desc; if (!m.spot) addMichiMarker(m); });
+      if (MICHI.length) map.attributionControl.addAttribution('道の駅：<a href="https://nlftp.mlit.go.jp/ksj/" target="_blank">国土数値情報（道の駅データ）</a>を加工・© OpenStreetMap contributors');
       listDirty = true;
       render();
     })
@@ -565,6 +646,30 @@ const StationToggle = L.Control.extend({
   },
 });
 map.addControl(new StationToggle());
+// 地図右上の「道の駅」表示ON/OFFボタン（駅のボタンの下）
+let michiToggleBtn = null;
+const MichiToggle = L.Control.extend({
+  options: { position: 'topright' },
+  onAdd() {
+    const b = L.DomUtil.create('button', 'map-toggle michi-toggle');
+    L.DomEvent.disableClickPropagation(b);
+    b.addEventListener('click', () => {
+      showMichi = !showMichi;
+      try { localStorage.setItem(SHOW_MICHI_KEY, showMichi ? '1' : '0'); } catch (e) {}
+      if (showMichi) michiLayer.addTo(map); else map.removeLayer(michiLayer);
+      updateMichiToggle();
+    });
+    michiToggleBtn = b;
+    return b;
+  },
+});
+map.addControl(new MichiToggle());
+function updateMichiToggle() {
+  if (!michiToggleBtn) return;
+  michiToggleBtn.classList.toggle('off', !showMichi);
+  michiToggleBtn.innerHTML = showMichi ? '🚗 道の駅：ON' : '🚗 道の駅：OFF';
+}
+updateMichiToggle();
 function updateStationToggle() {
   const b = stationToggleBtn;
   if (!b) return;
@@ -817,6 +922,18 @@ function renderSpots() {
   // まとめた丸の色（全部訪問済みなら灰色）も描き直す
   if (changed.length && spotLayer.refreshClusters) spotLayer.refreshClusters(changed);
 
+  // 道の駅の印（観光地を兼ねるものは観光地の印なので対象外）
+  const mChanged = [];
+  MICHI.forEach(m => {
+    const mk = michiMarkers[m.id];
+    if (!mk) return;
+    const v = state.michi[m.id], visited = !!v, todayVisited = !!v && v.last === today(), fav = !!state.favs[m.id];
+    if (mk.visited !== visited || mk.todayVisited !== todayVisited || mk.fav !== fav) {
+      mk.setIcon(michiIcon(visited, todayVisited, fav)); mk.visited = visited; mk.todayVisited = todayVisited; mk.fav = fav; mChanged.push(mk);
+    }
+  });
+  if (mChanged.length && michiLayer.refreshClusters) michiLayer.refreshClusters(mChanged);
+
   // 近くの観光地
   const n = nearestSpot();
   const box = $('spotBox'), hint = $('spotHint');
@@ -900,6 +1017,63 @@ function renderStations() {
   $('stCheckin').textContent = block || `駅チェックイン +${v ? XP_STATION_REVISIT : XP_STATION_NEW} XP`;
 }
 
+// ===== 道の駅チェックイン（観光地を兼ねる道の駅は観光地としてチェックインするので、ここでは扱わない） =====
+function nearestMichi() {
+  if (!current || !MICHI.length) return null;
+  const here = L.latLng(current.lat, current.lng);
+  let best = null;
+  MICHI.forEach(m => {
+    if (m.spot) return;
+    const d = here.distanceTo([m.lat, m.lng]);
+    if (!best || d < best.dist) best = { m, dist: d };
+  });
+  return best;
+}
+// 道の駅にチェックインできない理由（できるなら null）。GPS精度・速度の条件は観光地・駅と同じ
+function michiBlock(n) {
+  if (!n || n.dist > MICHI_RADIUS_M) return '範囲外';
+  if (!demo && current.acc > MAX_ACC_M) return `GPS精度が低いです（${MAX_ACC_M}m以内で可能）`;
+  const v = state.michi[n.m.id];
+  if (v && v.last === today()) return '今日はチェックイン済み';
+  return movingBlock();
+}
+$('mcCheckin').addEventListener('click', () => {
+  const n = nearestMichi();
+  if (michiBlock(n)) return;
+  const m = n.m, v = state.michi[m.id];
+  let gain, title;
+  if (!v) {
+    gain = XP_MICHI_NEW; title = '🚗 道の駅に到着！';
+    state.michi[m.id] = { name: m.name, pref: m.pref, city: m.city || '', first: today(), last: today(), count: 1 };
+  } else {
+    gain = XP_MICHI_REVISIT; title = 'また来ました';
+    v.last = today(); v.count++;
+  }
+  addLog('michi', m.id, m.name, m.pref, gain);
+  const before = levelOf(state.xp);
+  state.xp += gain;
+  save();
+  const after = levelOf(state.xp);
+  toast(`${title}<br>${esc(m.name)}<div class="big">+${gain} XP</div>` +
+        (after > before ? `<div>⬆ レベルアップ！ Lv${after}</div>` : '') +
+        (demo ? '<div style="font-size:12px;opacity:.8">テストモードのため保存されません</div>' : ''));
+  render();
+});
+// 道の駅の近く（MICHI_RADIUS_M 以内）にいるときだけ案内カードを出す
+function renderMichi() {
+  const n = nearestMichi(), box = $('mcBox');
+  if (!n || n.dist > MICHI_RADIUS_M) { box.hidden = true; return; }
+  const v = state.michi[n.m.id], block = michiBlock(n);
+  box.hidden = false;
+  $('mcName').textContent = `🚗 ${n.m.name}`;
+  $('mcStatus').innerHTML = v
+    ? `<span class="status old">訪問済み ${v.count}回</span>`
+    : '<span class="status new">未訪問！</span>';
+  $('mcSub').textContent = `道の駅・${n.m.city || ''}・ここから ${fmtDist(n.dist)}`;
+  $('mcCheckin').disabled = !!block;
+  $('mcCheckin').textContent = block || `道の駅チェックイン +${v ? XP_MICHI_REVISIT : XP_MICHI_NEW} XP`;
+}
+
 // ===== 市町村の総数（地理院の muni.js から都道府県ごとに数える。政令市は1市、郡は省く、今の数え方のまま） =====
 let MUNI_BY_PREF = null;
 function muniByPref() {
@@ -929,6 +1103,7 @@ function prefStats(p) {
     muni: [muniVisited, mb && mb[p] ? mb[p].length : null],
     spot: [spots.filter(s => state.spots[s.id]).length, spots.length],
     st: [sts ? sts.filter(s => state.stations[s.id]).length : 0, sts ? sts.length : null],
+    michi: (ms => [ms.filter(m => michiRec(m)).length, ms.length])(MICHI.filter(m => m.pref === p)),
   };
 }
 
@@ -972,7 +1147,7 @@ const fmtDay = d => { const [y, m, dd] = d.split('-').map(Number); return `${y}�
 
 // 達成状況の行（左：名前と達成率％、右：アイコン＋太字の「訪問数 / 総数」と小さなバーを縦に並べる）
 // stats = [{ icon, n, total, unit }]。total が無い（0・null）項目は右側に「—」で出し、達成率の計算には入れない
-const STAT_COLOR = { muni: '#1e6f5c', spot: '#7b4fc9', station: '#1F5FB0' };
+const STAT_COLOR = { muni: '#1e6f5c', spot: '#7b4fc9', station: '#1F5FB0', michi: '#3B6D11' };
 function statRow(nav, arg, titleHtml, stats, note) {
   const valid = stats.filter(s => s.total > 0);
   const N = valid.reduce((a, s) => a + s.n, 0), T = valid.reduce((a, s) => a + s.total, 0);
@@ -991,13 +1166,21 @@ function statRow(nav, arg, titleHtml, stats, note) {
     `${note ? `<div class="n-sub">${note}</div>` : ''}</div>` +
     `<div class="s-right">${right}</div><span class="n-arrow">›</span></button>`;
 }
-// 都道府県の3項目（市町村・観光地・駅）
+// 都道府県の4項目（市町村・観光地・駅・道の駅）
 const prefStatItems = s => [
   { icon: '🏙️', n: s.muni[0], total: s.muni[1], color: STAT_COLOR.muni },
   { icon: '📍', n: s.spot[0], total: s.spot[1], color: STAT_COLOR.spot },
   { icon: '🚉', n: s.st[0], total: s.st[1], color: STAT_COLOR.station },
+  { icon: '🚗', n: s.michi[0], total: s.michi[1], color: STAT_COLOR.michi },
 ];
-const prefVisited = p => { const s = prefStats(p); return s.muni[0] + s.spot[0] + s.st[0] > 0; };
+const prefVisited = p => { const s = prefStats(p); return s.muni[0] + s.spot[0] + s.st[0] + s.michi[0] > 0; };
+// 道の駅の一覧の1行（観光地兼道の駅は観光地の詳細カードを開く）
+function michiItem(m) {
+  const v = michiRec(m);
+  return item({ mark: v ? '✅' : '・', todo: !v, attrs: `data-spot="${esc(m.spot || m.id)}"`,
+    name: `🚗 ${esc(m.name)}${state.favs[m.spot || m.id] ? ' ★' : ''}${v && v.memo ? ' 📝' : ''}`,
+    sub: esc((m.city || '') + (m.spot ? '・観光地兼道の駅' : '')), right: visitRight(v) });
+}
 
 // ===== 各ページ（name → arg を受け取って { title, html } を返す） =====
 const VIEWS = {
@@ -1015,6 +1198,7 @@ const VIEWS = {
         { icon: '🏙️', n: muniN, total: muniT, color: STAT_COLOR.muni },
         { icon: '📍', n: spN, total: SPOTS.length, color: STAT_COLOR.spot },
         { icon: '🚉', n: stN, total: STATIONS ? STATIONS.length : 0, color: STAT_COLOR.station },
+        { icon: '🚗', n: MICHI.filter(m => michiRec(m)).length, total: MICHI.length, color: STAT_COLOR.michi },
       ], `訪問した都道府県 ${prefN} / 47`) +
       statRow('lines', '', '🚉 鉄道路線', [
         { icon: '🏁', n: lineDone, total: STATIONS ? LINES.length : 0, unit: '路線', color: STAT_COLOR.station },
@@ -1029,7 +1213,7 @@ const VIEWS = {
     const chips = `<div class="chips"><button class="chip${filter === 'all' ? ' on' : ''}" data-filter="all">すべて（47）</button>` +
       `<button class="chip${filter === 'visited' ? ' on' : ''}" data-filter="visited">行ったことのある県だけ（${visited.length}）</button></div>`;
     return { title: '🗾 都道府県', html: chips +
-      '<div class="list-note">🏙️ 市町村　📍 観光地　🚉 鉄道駅。％は3つを合わせた達成率。タップで詳しく見られます</div>' +
+      '<div class="list-note">🏙️ 市町村　📍 観光地　🚉 鉄道駅　🚗 道の駅。％はこれらを合わせた達成率。タップで詳しく見られます</div>' +
       (list.length ? list.map(p => statRow('pref', p, esc(p), prefStatItems(prefStats(p)))).join('')
         : '<div class="empty">まだ行ったことのある県がありません</div>') };
   },
@@ -1042,7 +1226,15 @@ const VIEWS = {
       statRow('prefSpots', p, '📍 観光地', [{ icon: '📍', n: s.spot[0], total: s.spot[1], color: STAT_COLOR.spot }],
         s.spot[1] ? '' : 'まだ観光地が登録されていません') +
       statRow('prefStations', p, '🚉 鉄道駅', [{ icon: '🚉', n: s.st[0], total: s.st[1], unit: '駅', color: STAT_COLOR.station }],
-        !STATIONS ? '駅データを読み込み中…' : s.st[1] ? '' : 'まだ駅データがありません') };
+        !STATIONS ? '駅データを読み込み中…' : s.st[1] ? '' : 'まだ駅データがありません') +
+      statRow('prefMichi', p, '🚗 道の駅', [{ icon: '🚗', n: s.michi[0], total: s.michi[1], color: STAT_COLOR.michi }],
+        s.michi[1] ? '' : 'まだ道の駅が登録されていません') };
+  },
+  prefMichi(p) {
+    const list = MICHI.filter(m => m.pref === p).sort((a, b) => (michiRec(b) ? 1 : 0) - (michiRec(a) ? 1 : 0));
+    const n = list.filter(m => michiRec(m)).length;
+    return { title: `${p}の道の駅`, html: `<div class="sec-h">${cNum(n, list.length)}　タップで詳細</div>` +
+      items(list.map(michiItem)) };
   },
   prefMuni(p) {
     const mb = muniByPref(), names = (mb && mb[p]) || [];
@@ -1087,9 +1279,12 @@ const VIEWS = {
   // お気に入り一覧（すべて／都道府県ごと）
   favs(filter) {
     filter = filter || 'all';
-    const ids = Object.keys(state.favs).filter(id => spotById(id) || state.spots[id]);
+    const ids = Object.keys(state.favs).filter(id => spotById(id) || state.spots[id] || michiById(id) || state.michi[id]);
     // 複数県にまたがる観光地（三県境など）は、それぞれの県に出す
-    const prefsOf = id => { const s = spotById(id); return s ? spotPrefs(s) : [(state.spots[id] && state.spots[id].pref) || 'その他']; };
+    const prefsOf = id => {
+      if (isMichiId(id)) { const m = michiById(id), v = state.michi[id]; return [(m || v || {}).pref || 'その他']; }
+      const s = spotById(id); return s ? spotPrefs(s) : [(state.spots[id] && state.spots[id].pref) || 'その他'];
+    };
     const prefOf = id => prefsOf(id).join('・');
     const prefs = [...new Set(ids.flatMap(prefsOf))].sort((a, b) => prefRank(a) - prefRank(b));
     const chips = `<div class="chips"><button class="chip${filter === 'all' ? ' on' : ''}" data-filter="all">すべて（${ids.length}）</button>` +
@@ -1097,8 +1292,9 @@ const VIEWS = {
     const shown = ids.filter(id => filter === 'all' || prefsOf(id).includes(filter)).sort((a, b) => state.favs[a] < state.favs[b] ? 1 : -1);
     if (!ids.length) return { title: '⭐ お気に入り一覧', html: '<div class="empty">お気に入りはまだありません。<br>観光地の詳細カードで「☆ お気に入り」を押すと登録できます。</div>' };
     return { title: '⭐ お気に入り一覧', html: chips + items(shown.map(id => {
-      const s = spotById(id), v = state.spots[id];
-      const t = spotType(s), name = s ? s.name : v.name, city = s ? s.city : (v.city || '');
+      const mi = isMichiId(id);
+      const s = mi ? michiById(id) : spotById(id), v = mi ? state.michi[id] : state.spots[id];
+      const t = mi ? MICHI_TYPE : spotType(s), name = s ? s.name : v.name, city = s ? s.city : (v.city || '');
       return item({ mark: '<span style="color:#f0b400">★</span>', attrs: `data-spot="${esc(id)}"`,
         name: `${t.icon} ${esc(name)}${v && v.memo ? ' 📝' : ''}`,
         sub: esc(`${prefOf(id)} ${city}`.trim() + `・登録 ${state.favs[id]}`),
@@ -1108,7 +1304,7 @@ const VIEWS = {
   // 最近の訪問（チェックインの新しい順）
   recent(filter) {
     filter = filter || 'all';
-    const kinds = [['all', 'すべて'], ['muni', '🏙️ 市町村'], ['spot', '📍 観光地'], ['station', '🚉 駅']];
+    const kinds = [['all', 'すべて'], ['muni', '🏙️ 市町村'], ['spot', '📍 観光地'], ['station', '🚉 駅'], ['michi', '🚗 道の駅']];
     const chips = '<div class="chips">' + kinds.map(([k, label]) =>
       `<button class="chip${filter === k ? ' on' : ''}" data-filter="${k}">${label}</button>`).join('') + '</div>';
     const log = state.log.map((e, i) => Object.assign({ i }, e))
@@ -1122,9 +1318,9 @@ const VIEWS = {
       const d = e.at.slice(0, 10);
       if (d !== day) { flush(); day = d; html += `<div class="sec-h">${fmtDay(d)}</div>`; }
       const s = e.type === 'spot' ? spotById(e.id) : null;
-      const icon = e.type === 'muni' ? '🏙️' : e.type === 'station' ? '🚉' : spotType(s).icon;
-      const label = e.type === 'muni' ? '市町村' : e.type === 'station' ? '駅' : spotType(s).label;
-      const attrs = e.type === 'spot' ? `data-spot="${esc(e.id)}"` : e.type === 'station' ? `data-station="${esc(e.id)}"` : '';
+      const icon = e.type === 'muni' ? '🏙️' : e.type === 'station' ? '🚉' : e.type === 'michi' ? MICHI_TYPE.icon : spotType(s).icon;
+      const label = e.type === 'muni' ? '市町村' : e.type === 'station' ? '駅' : e.type === 'michi' ? MICHI_TYPE.label : spotType(s).label;
+      const attrs = (e.type === 'spot' || e.type === 'michi') ? `data-spot="${esc(e.id)}"` : e.type === 'station' ? `data-station="${esc(e.id)}"` : '';
       rows.push(item({ mark: icon, attrs, name: esc(e.name) + (e.type === 'station' ? '駅' : ''),
         sub: esc([label, e.pref].filter(Boolean).join('・')),
         right: (e.at.length > 10 ? e.at.slice(11, 16) : '時刻不明') + (typeof e.xp === 'number' ? `<br>+${e.xp} XP` : '') }));
@@ -1200,16 +1396,21 @@ $('drawer').addEventListener('click', e => {
   else if (e.target === $('drawer')) closeDrawer(); // 外側をタップで閉じる
 });
 
-// ===== 観光地の詳細カード =====
+// ===== 観光地・道の駅の詳細カード（id が michi- で始まれば道の駅） =====
+// 記録の置き場所：観光地は state.spots、道の駅は state.michi
+const recStore = id => isMichiId(id) ? state.michi : state.spots;
 function openSpotDetail(id) {
-  const s = spotById(id), v = state.spots[id];
+  const isM = isMichiId(id);
+  if (isM && michiById(id) && michiById(id).spot) return openSpotDetail(michiById(id).spot); // 観光地を兼ねる道の駅は観光地のカード
+  const s = isM ? michiById(id) : spotById(id), v = recStore(id)[id];
   if (!s && !v) return;
-  const t = spotType(s);
-  $('dIcon').textContent = t.icon;
-  $('dIcon').className = 'detail-icon t-' + ((s && s.type) || 'other') + (s && s.rare ? ' rare' : '');
+  const t = isM ? MICHI_TYPE : spotType(s);
+  $('dIcon').textContent = isM ? '道' : t.icon;
+  $('dIcon').className = isM ? 'detail-icon michi' : 'detail-icon t-' + ((s && s.type) || 'other') + (s && s.rare ? ' rare' : '');
   $('dName').textContent = s ? s.name : v.name;
-  const pref = s ? spotPrefs(s).join('・') : (v && v.pref) || '', city = (s && s.city) || (v && v.city) || '';
-  $('dType').textContent = [s && s.rare ? '✨ レアスポット' : '', t.label, (pref + ' ' + city).trim()].filter(Boolean).join('・');
+  const pref = s ? (isM ? s.pref : spotPrefs(s).join('・')) : (v && v.pref) || '', city = (s && s.city) || (v && v.city) || '';
+  $('dType').textContent = [s && s.rare ? '✨ レアスポット' : '', t.label, s && s.michi ? '🚗 道の駅' : '', (pref + ' ' + city).trim()]
+    .filter(Boolean).join('・');
   $('dDesc').textContent = SPOT_DESC[id] || '説明はまだありません。';
   // 世界遺産（spots.json の wh: { type: 'culture' | 'nature', name: 世界遺産の名前 }）
   const wh = s && s.wh;
@@ -1223,7 +1424,7 @@ function openSpotDetail(id) {
   $('dFirst').textContent = v ? v.first : '未訪問';
   $('dLast').textContent = v ? v.last : '―';
   $('dCount').textContent = `${v ? v.count : 0}回`;
-  $('dXp').textContent = `${spotXp(s, v)} XP`;
+  $('dXp').textContent = `${isM ? michiXp(v) : spotXp(s, v)} XP`;
   renderFavButton(id);
   // 思い出メモ（訪問済みの観光地だけ書ける）
   detailId = id;
@@ -1264,14 +1465,15 @@ $('dFav').addEventListener('click', () => {
   render();
 });
 
-// この観光地でこれまでに得たXP（初訪問 + 再訪の回数分）
+// この観光地・道の駅でこれまでに得たXP（初訪問 + 再訪の回数分）
 const spotXp = (s, v) => v ? (s && s.rare ? XP_RARE_NEW : XP_SPOT_NEW) + (v.count - 1) * XP_SPOT_REVISIT : 0;
+const michiXp = v => v ? XP_MICHI_NEW + (v.count - 1) * XP_MICHI_REVISIT : 0;
 
 // 思い出メモは入力するたびに少し待って自動保存する
 let detailId = null, memoTimer = null;
 function saveMemo() {
   clearTimeout(memoTimer);
-  const v = detailId && state.spots[detailId];
+  const v = detailId && recStore(detailId)[detailId];
   if (!v) return;
   const text = $('dMemo').value.trim();
   if (text === (v.memo || '')) return;
@@ -1324,6 +1526,7 @@ function render() {
   }
 
   renderSpots();
+  renderMichi();
   renderStations();
 
   // メニューのページを開いているときは、記録が変わったときだけ作り直す（GPSの更新のたびには作り直さない）
@@ -1350,7 +1553,7 @@ function renderBackupInfo() {
 $('export').addEventListener('click', () => {
   const real = demo ? realState : state; // テストモード中でも本物の記録を保存する
   const data = { app: 'tabilog', version: 1, exported: today(), xp: real.xp, visited: real.visited, spots: real.spots,
-    stations: real.stations, favs: real.favs, log: real.log };
+    stations: real.stations, michi: real.michi, favs: real.favs, log: real.log };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1374,7 +1577,7 @@ $('importFile').addEventListener('change', async e => {
   let data;
   try { data = parseBackup(await f.text()); }
   catch (err) { alert('読み込めませんでした：' + err.message); return; }
-  const desc = s => `${s.xp} XP・${Object.keys(s.visited).length}市町村・観光地${Object.keys(s.spots).length}か所・${Object.keys(s.stations).length}駅`;
+  const desc = s => `${s.xp} XP・${Object.keys(s.visited).length}市町村・観光地${Object.keys(s.spots).length}か所・${Object.keys(s.stations).length}駅・道の駅${Object.keys(s.michi || {}).length}か所`;
   if (!confirm(`ファイルの記録（${desc(data)}）で、今の記録（${desc(state)}）を置き換えます。よろしいですか？`)) return;
   state = data; save(); render();
   toast('📂 記録を読み込みました');
@@ -1416,14 +1619,26 @@ function parseBackup(text) {
         first: v.first, last: v.last, count: v.count };
     }
   }
-  // お気に入り（{ 観光地id: 登録日 }）と履歴（無ければ今までの記録から作る）
+  // 道の駅の記録（道の駅機能より前に保存したファイルには無い）
+  const michi = {};
+  if (j.michi !== undefined) {
+    if (typeof j.michi !== 'object' || j.michi === null) throw new Error('記録の形式が正しくありません');
+    for (const [id, v] of Object.entries(j.michi)) {
+      const ok = v && ['name', 'first', 'last'].every(f => typeof v[f] === 'string') && typeof v.count === 'number';
+      if (!ok) throw new Error('道の駅の記録の形式が正しくありません');
+      michi[id] = { name: v.name, pref: typeof v.pref === 'string' ? v.pref : '', city: typeof v.city === 'string' ? v.city : '',
+        first: v.first, last: v.last, count: v.count };
+      if (typeof v.memo === 'string' && v.memo) michi[id].memo = v.memo.slice(0, 500);
+    }
+  }
+  // お気に入り（{ 観光地・道の駅のid: 登録日 }）と履歴（無ければ今までの記録から作る）
   const favs = {};
   if (j.favs && typeof j.favs === 'object') {
     for (const [id, d] of Object.entries(j.favs)) if (typeof d === 'string') favs[id] = d;
   }
-  const s = { xp: Math.floor(j.xp), visited, spots, stations, favs };
+  const s = { xp: Math.floor(j.xp), visited, spots, stations, michi, favs };
   s.log = Array.isArray(j.log)
-    ? j.log.filter(e => e && ['muni', 'spot', 'station'].includes(e.type) && typeof e.id === 'string' &&
+    ? j.log.filter(e => e && ['muni', 'spot', 'station', 'michi'].includes(e.type) && typeof e.id === 'string' &&
         typeof e.name === 'string' && typeof e.at === 'string').slice(-LOG_MAX)
         .map(e => ({ type: e.type, id: e.id, name: e.name, pref: typeof e.pref === 'string' ? e.pref : '', at: e.at,
           xp: typeof e.xp === 'number' ? e.xp : undefined }))
@@ -1461,7 +1676,7 @@ $('demo').addEventListener('click', toggleDemo);
 map.on('click', e => { if (demo) setPosition(e.latlng.lat, e.latlng.lng, 0, true); });
 $('reset').addEventListener('click', () => {
   if (confirm('経験値と訪問記録をすべて消します。よろしいですか？')) {
-    state = { xp: 0, visited: {}, spots: {}, stations: {}, favs: {}, log: [] }; save(); render();
+    state = { xp: 0, visited: {}, spots: {}, stations: {}, michi: {}, favs: {}, log: [] }; save(); render();
   }
 });
 
