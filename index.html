@@ -129,6 +129,26 @@
   .nav-row .n-sub { font-size:12px; color:var(--muted); margin-top:3px; }
   .nav-row .n-arrow { color:var(--muted); font-size:18px; }
   .nav-row .c-bar { width:100%; margin-top:6px; }
+  /* 達成状況の行（左：名前と達成率％、右：アイコン＋太字の数字＋小さなバー） */
+  .stat-row { align-items:center; }
+  .stat-row .s-left { flex:1; min-width:0; }
+  .stat-row .s-name { font-size:16px; font-weight:700; display:flex; align-items:center; gap:6px; }
+  .stat-row .s-pct { font-size:24px; font-weight:800; color:var(--main); line-height:1.1; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .stat-row .s-pct small { font-size:13px; font-weight:700; margin-left:1px; }
+  .stat-row .s-right { display:grid; grid-template-columns:auto auto 46px; gap:4px 6px; align-items:center; flex:none; }
+  .stat-row .s-ic { font-size:14px; text-align:center; }
+  .stat-row .s-num { font-size:16px; font-weight:800; text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; color:#333; }
+  .stat-row .s-num.on { color:var(--main); }
+  .stat-row .s-num.done { color:#c99a00; }
+  .stat-row .s-num.none { color:#b5bdb9; font-weight:700; }
+  .stat-row .s-num .t { font-size:12px; font-weight:700; color:var(--muted); }
+  .stat-row .s-bar { height:6px; background:#e5e9e7; border-radius:3px; overflow:hidden; }
+  .stat-row .s-bar > div { height:100%; background:var(--main); }
+  .stat-row .s-bar > div.done { background:#d4a017; }
+  .stat-row.zero { opacity:.5; }                          /* まだ1つも行っていない */
+  .stat-row.zero .s-pct { color:var(--muted); }
+  .stat-row.all-done { box-shadow:0 0 0 2px #d4a017 inset, 0 1px 3px rgba(0,0,0,.06); }  /* 全部達成 */
+  .stat-row.all-done .s-pct { color:#c99a00; }
   .item { display:flex; align-items:center; gap:8px; background:#fff; padding:10px 12px; border-bottom:1px solid #eef1ef; font-size:14px; }
   .item:first-of-type { border-radius:10px 10px 0 0; }
   .item:last-child { border-radius:0 0 10px 10px; border-bottom:none; }
@@ -950,6 +970,35 @@ const stationItem = (st, sub) => {
 const WEEK = '日月火水木金土';
 const fmtDay = d => { const [y, m, dd] = d.split('-').map(Number); return `${y}年${m}月${dd}日（${WEEK[new Date(y, m - 1, dd).getDay()]}）`; };
 
+// 達成状況の行（左：名前と達成率％、右：アイコン＋太字の「訪問数 / 総数」と小さなバーを縦に並べる）
+// stats = [{ icon, n, total, unit }]。total が無い（0・null）項目は右側に「—」で出し、達成率の計算には入れない
+const STAT_COLOR = { muni: '#1e6f5c', spot: '#7b4fc9', station: '#1F5FB0' };
+function statRow(nav, arg, titleHtml, stats, note) {
+  const valid = stats.filter(s => s.total > 0);
+  const N = valid.reduce((a, s) => a + s.n, 0), T = valid.reduce((a, s) => a + s.total, 0);
+  const allDone = T > 0 && N === T;
+  const pct = T ? (allDone ? 100 : Math.floor(N / T * 1000) / 10) : null; // 小数第1位まで（切り捨て）
+  const right = stats.map(s => {
+    if (!(s.total > 0)) return `<span class="s-ic">${s.icon}</span><span class="s-num none">—</span><span></span>`;
+    const done = s.n === s.total, w = s.n / s.total * 100;
+    return `<span class="s-ic">${s.icon}</span>` +
+      `<span class="s-num${done ? ' done' : s.n ? ' on' : ''}">${s.n}<span class="t"> / ${s.total}${s.unit || ''}</span>${done ? ' 🎉' : ''}</span>` +
+      `<span class="s-bar"><div style="width:${w}%;${done ? '' : s.color ? 'background:' + esc(s.color) : ''}"${done ? ' class="done"' : ''}></div></span>`;
+  }).join('');
+  return `<button class="nav-row stat-row${N === 0 ? ' zero' : ''}${allDone ? ' all-done' : ''}" data-nav="${esc(nav)}" data-arg="${esc(arg || '')}">` +
+    `<div class="s-left"><div class="s-name">${titleHtml}</div>` +
+    `<div class="s-pct">${pct === null ? '—' : pct}<small>${pct === null ? '' : '%'}</small>${allDone ? ' 🎉' : ''}</div>` +
+    `${note ? `<div class="n-sub">${note}</div>` : ''}</div>` +
+    `<div class="s-right">${right}</div><span class="n-arrow">›</span></button>`;
+}
+// 都道府県の3項目（市町村・観光地・駅）
+const prefStatItems = s => [
+  { icon: '🏙️', n: s.muni[0], total: s.muni[1], color: STAT_COLOR.muni },
+  { icon: '📍', n: s.spot[0], total: s.spot[1], color: STAT_COLOR.spot },
+  { icon: '🚉', n: s.st[0], total: s.st[1], color: STAT_COLOR.station },
+];
+const prefVisited = p => { const s = prefStats(p); return s.muni[0] + s.spot[0] + s.st[0] > 0; };
+
 // ===== 各ページ（name → arg を受け取って { title, html } を返す） =====
 const VIEWS = {
   // コンプリート一覧：都道府県／鉄道路線
@@ -960,31 +1009,40 @@ const VIEWS = {
     const spN = SPOTS.filter(s => state.spots[s.id]).length;
     const stN = STATIONS ? STATIONS.filter(s => state.stations[s.id]).length : 0;
     const lineDone = LINES.filter(l => l.st.every(id => state.stations[id])).length;
+    const prefN = PREF_ORDER.filter(prefVisited).length;
     return { title: '🏆 コンプリート一覧', html:
-      navRow('prefs', '', '🗾 都道府県', { note: `市町村 ${muniN}${muniT ? ' / ' + muniT : ''}・観光地 ${spN} / ${SPOTS.length}` +
-        (STATIONS ? `・駅 ${stN} / ${STATIONS.length}` : '') }) +
-      navRow('lines', '', '🚉 鉄道路線', { note: STATIONS
-        ? `全駅制覇 ${lineDone} / ${LINES.length}路線・駅 ${stN} / ${STATIONS.length}` : '駅データを読み込み中…' }) };
+      statRow('prefs', '', '🗾 都道府県', [
+        { icon: '🏙️', n: muniN, total: muniT, color: STAT_COLOR.muni },
+        { icon: '📍', n: spN, total: SPOTS.length, color: STAT_COLOR.spot },
+        { icon: '🚉', n: stN, total: STATIONS ? STATIONS.length : 0, color: STAT_COLOR.station },
+      ], `訪問した都道府県 ${prefN} / 47`) +
+      statRow('lines', '', '🚉 鉄道路線', [
+        { icon: '🏁', n: lineDone, total: STATIONS ? LINES.length : 0, unit: '路線', color: STAT_COLOR.station },
+        { icon: '🚉', n: stN, total: STATIONS ? STATIONS.length : 0, unit: '駅', color: STAT_COLOR.station },
+      ], STATIONS ? '🏁＝全駅制覇した路線' : '駅データを読み込み中…') };
   },
-  // 都道府県の一覧（北海道〜沖縄）
-  prefs() {
-    return { title: '🗾 都道府県', html: '<div class="list-note">都道府県をタップすると、市町村・観光地・鉄道駅の達成率が見られます</div>' +
-      PREF_ORDER.map(p => {
-        const s = prefStats(p), parts = [];
-        parts.push(`市町村 ${s.muni[0]}${s.muni[1] != null ? ' / ' + s.muni[1] : ''}`);
-        if (s.spot[1]) parts.push(`観光地 ${s.spot[0]} / ${s.spot[1]}`);
-        if (s.st[1]) parts.push(`駅 ${s.st[0]} / ${s.st[1]}`);
-        return navRow('pref', p, esc(p), { note: parts.join('・') });
-      }).join('') };
+  // 都道府県の一覧（北海道〜沖縄）。filter = 'all'（すべて）／'visited'（行ったことのある県だけ）
+  prefs(filter) {
+    filter = filter || 'all';
+    const visited = PREF_ORDER.filter(prefVisited);
+    const list = filter === 'visited' ? visited : PREF_ORDER;
+    const chips = `<div class="chips"><button class="chip${filter === 'all' ? ' on' : ''}" data-filter="all">すべて（47）</button>` +
+      `<button class="chip${filter === 'visited' ? ' on' : ''}" data-filter="visited">行ったことのある県だけ（${visited.length}）</button></div>`;
+    return { title: '🗾 都道府県', html: chips +
+      '<div class="list-note">🏙️ 市町村　📍 観光地　🚉 鉄道駅。％は3つを合わせた達成率。タップで詳しく見られます</div>' +
+      (list.length ? list.map(p => statRow('pref', p, esc(p), prefStatItems(prefStats(p)))).join('')
+        : '<div class="empty">まだ行ったことのある県がありません</div>') };
   },
   // 1つの都道府県：市町村／観光地／鉄道駅
   pref(p) {
     const s = prefStats(p);
     return { title: p, html:
-      navRow('prefMuni', p, '🏙️ 市町村', s.muni[1] != null ? { n: s.muni[0], total: s.muni[1] } : { note: '市町村のデータを読み込めませんでした' }) +
-      navRow('prefSpots', p, '📍 観光地', s.spot[1] ? { n: s.spot[0], total: s.spot[1], color: '#7b4fc9' } : { note: 'まだ観光地が登録されていません' }) +
-      navRow('prefStations', p, '🚉 鉄道駅', !STATIONS ? { note: '駅データを読み込み中…' }
-        : s.st[1] ? { n: s.st[0], total: s.st[1], unit: '駅', color: '#1F5FB0' } : { note: 'まだ駅データがありません' }) };
+      statRow('prefMuni', p, '🏙️ 市町村', [{ icon: '🏙️', n: s.muni[0], total: s.muni[1], color: STAT_COLOR.muni }],
+        s.muni[1] != null ? '' : '市町村のデータを読み込めませんでした') +
+      statRow('prefSpots', p, '📍 観光地', [{ icon: '📍', n: s.spot[0], total: s.spot[1], color: STAT_COLOR.spot }],
+        s.spot[1] ? '' : 'まだ観光地が登録されていません') +
+      statRow('prefStations', p, '🚉 鉄道駅', [{ icon: '🚉', n: s.st[0], total: s.st[1], unit: '駅', color: STAT_COLOR.station }],
+        !STATIONS ? '駅データを読み込み中…' : s.st[1] ? '' : 'まだ駅データがありません') };
   },
   prefMuni(p) {
     const mb = muniByPref(), names = (mb && mb[p]) || [];
@@ -1016,8 +1074,8 @@ const VIEWS = {
     if (!STATIONS) return { title: '🚉 鉄道路線', html: '<div class="empty">駅データを読み込み中…</div>' };
     return { title: '🚉 鉄道路線', html:
       `<div class="list-note">いまは${esc(STATION_AREA || '一部の地域')}内の駅だけです（県をまたぐ路線は、その範囲の駅数）</div>` +
-      LINES.map(l => navRow('line', l.id, `${lineChip(l)}${esc(l.label)}`,
-        { n: l.st.filter(id => state.stations[id]).length, total: l.st.length, unit: '駅', color: l.color })).join('') };
+      LINES.map(l => statRow('line', l.id, `${lineChip(l)}${esc(l.label)}`,
+        [{ icon: '🚉', n: l.st.filter(id => state.stations[id]).length, total: l.st.length, unit: '駅', color: l.color }])).join('') };
   },
   line(id) {
     const l = lineIndex[id];
