@@ -22,12 +22,34 @@
   .bar > div { height:100%; background:var(--accent); width:0; transition:width .6s; }
   .xptext { font-size:11px; opacity:.85; margin-top:3px; text-align:right; }
   #map { flex:1; min-height:240px; }
-  .panel { background:#fff; padding:12px 14px; box-shadow:0 -2px 8px rgba(0,0,0,.08); z-index:500; }
-  #place { font-size:22px; font-weight:700; }
-  #pref { font-size:13px; color:var(--muted); }
+  .panel { background:#fff; padding:10px 14px calc(10px + env(safe-area-inset-bottom)); box-shadow:0 -2px 8px rgba(0,0,0,.08); z-index:500; }
+  /* 市町村名・状態・都道府県・GPS精度を1行に（入りきらないときは折り返す） */
+  .place-line { display:flex; flex-wrap:wrap; align-items:baseline; column-gap:8px; row-gap:2px; margin-bottom:8px; }
+  #place { font-size:20px; font-weight:700; }
+  #status .status { margin-left:0; }
+  #pref, #sub { font-size:12px; color:var(--muted); }
+  #sub:empty, #pref:empty { display:none; }
+  #pref + #sub::before { content:'・'; }
+  #pref:empty + #sub::before { content:''; }
   .status { display:inline-block; font-size:12px; padding:2px 8px; border-radius:10px; margin-left:6px; vertical-align:middle; }
   .new { background:#ffe9b3; color:#8a5a00; } .old { background:#e3efe9; color:var(--main); }
-  #sub { font-size:12px; color:var(--muted); margin:4px 0 10px; min-height:1em; }
+  .status.done { background:#7cb342; color:#fff; }
+  /* 今日チェックイン済みの観光地・道の駅・駅（カードの代わりの1行） */
+  .done-line { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .done-line[hidden] { display:none; }
+  .done-chip { font-size:12px; padding:4px 9px; border-radius:14px; background:#f3fae9; border:1px solid #b9d98f; color:#33691e;
+    white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+  .done-chip.tap { cursor:pointer; }
+  /* 地図の上の「現在地を更新」ボタン */
+  .locate-btn { width:44px; height:44px; border-radius:50%; background:#fff; border:2px solid rgba(0,0,0,.2);
+    box-shadow:0 1px 4px rgba(0,0,0,.25); font-size:20px; padding:0; display:flex; align-items:center; justify-content:center; }
+  /* 出典（ふだんは短く1行。ⓘ で全文） */
+  .leaflet-control-attribution { display:none; }
+  .attr-open .leaflet-control-attribution { display:block; font-size:10px; }
+  .attr-short { background:rgba(255,255,255,.8); font-size:10px; color:#333; padding:1px 6px; cursor:pointer; white-space:nowrap; }
+  .attr-short b { color:#1F5FB0; font-weight:400; margin-left:3px; }
+  .demo-banner button { margin-left:8px; background:#fff; color:#d33; font-size:12px; font-weight:700; padding:2px 10px; border-radius:10px; }
+  .drawer-panel button.demo-item.on { color:#d33; font-weight:700; }
   button { font:inherit; border:none; border-radius:10px; padding:12px; cursor:pointer; }
   #checkin { width:100%; background:var(--accent); color:#fff; font-size:18px; font-weight:700; }
   #checkin:disabled { background:#c9cfcc; }
@@ -248,13 +270,14 @@
   <div class="bar"><div id="barfill"></div></div>
   <div class="xptext" id="xptext">0 XP</div>
 </header>
-<div class="demo-banner">テストモード：地図をタップした場所にいることにします（記録は保存されません）</div>
+<div class="demo-banner">🧪 テスト中：地図をタップした場所へ移動（保存なし）<button id="demoEnd">終了</button></div>
 <div id="map"></div>
 <section class="panel">
-  <div><span id="place">現在地を取得中…</span><span id="status"></span></div>
-  <div id="pref"></div>
-  <div id="sub"></div>
+  <!-- 市町村名・状態・都道府県・GPS精度を1行に並べる（入りきらないときだけ折り返す） -->
+  <div class="place-line"><span id="place">現在地を取得中…</span><span id="status"></span><span id="pref"></span><span id="sub"></span></div>
   <button id="checkin" disabled>チェックイン</button>
+  <!-- 今日チェックイン済みの観光地・道の駅・駅は、カードの代わりにここへ1行で並べる -->
+  <div id="doneLine" class="done-line" hidden></div>
   <div id="spotBox" class="spot" hidden>
     <div><span id="spotName" class="spot-name"></span><span id="spotStatus"></span></div>
     <div id="spotSub" class="spot-sub"></div>
@@ -272,10 +295,6 @@
     <button id="stCheckin">駅チェックイン</button>
   </div>
   <div id="spotHint" class="spot-hint"></div>
-  <div class="row">
-    <button id="locate">📍 現在地を更新</button>
-    <button id="demo">🧪 テストモード</button>
-  </div>
 </section>
 <!-- メニュー（左から出る） -->
 <div id="drawer" class="drawer" hidden>
@@ -285,6 +304,7 @@
     <button data-open="favs">⭐ お気に入り一覧</button>
     <button data-open="recent">🕒 最近の訪問</button>
     <button data-open="manage">💾 記録の管理</button>
+    <button id="demo" class="demo-item">🧪 テストモード</button>
   </nav>
 </div>
 <!-- メニューから開く全画面のページ -->
@@ -460,6 +480,33 @@ L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
   maxZoom: 18,
   attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>'
 }).addTo(map);
+// 出典：スマホで3段にならないよう、ふだんは短い1行だけ出し、タップで Leaflet の出典（全文）を開く
+const AttrShort = L.Control.extend({
+  options: { position: 'bottomright' },
+  onAdd() {
+    const d = L.DomUtil.create('div', 'attr-short');
+    d.innerHTML = '© 地理院タイル・国土数値情報・OSM<b>ⓘ</b>';
+    d.title = '出典を表示';
+    L.DomEvent.disableClickPropagation(d);
+    d.addEventListener('click', () => {
+      const open = map.getContainer().classList.toggle('attr-open');
+      d.querySelector('b').textContent = open ? '✕' : 'ⓘ';
+    });
+    return d;
+  },
+});
+new AttrShort().addTo(map);
+// 現在地を更新するボタン（地図の右下）
+const LocateBtn = L.Control.extend({
+  options: { position: 'bottomright' },
+  onAdd() {
+    const b = L.DomUtil.create('button', 'locate-btn');
+    b.id = 'locate'; b.type = 'button'; b.title = '現在地を更新'; b.setAttribute('aria-label', '現在地を更新'); b.textContent = '📍';
+    L.DomEvent.disableClickPropagation(b);
+    return b;
+  },
+});
+new LocateBtn().addTo(map);
 // 重なり順：観光地のアイコン（markerPane 600）＜ 駅の点（stations 640）＜ 現在地の点（me 650）＜ フキダシ（700）
 map.createPane('stations').style.zIndex = 640;
 map.createPane('me').style.zIndex = 650;
@@ -937,7 +984,11 @@ function renderSpots() {
   // 近くの観光地
   const n = nearestSpot();
   const box = $('spotBox'), hint = $('spotHint');
-  if (n && n.dist <= SPOT_RADIUS_M) {
+  if (n && n.dist <= SPOT_RADIUS_M && state.spots[n.spot.id] && state.spots[n.spot.id].last === today()) {
+    // 今日チェックイン済み：カードは出さず、1行の「済み」表示にまとめる
+    box.hidden = true; hint.textContent = '';
+    doneChips.push({ text: `✅ ${spotType(n.spot).icon} ${n.spot.name}`, spot: n.spot.id });
+  } else if (n && n.dist <= SPOT_RADIUS_M) {
     const v = state.spots[n.spot.id], block = spotBlock(n);
     box.hidden = false; hint.textContent = '';
     $('spotName').textContent = `${n.spot.rare ? '✨ ' : ''}${spotType(n.spot).icon} ${n.spot.name}`;
@@ -1006,6 +1057,7 @@ function renderStations() {
   const n = nearestStation(), box = $('stBox');
   if (!n || n.dist > STATION_RADIUS_M) { box.hidden = true; return; }
   const v = state.stations[n.st.id], block = stationBlock(n);
+  if (v && v.last === today()) { box.hidden = true; doneChips.push({ text: `✅ 🚉 ${n.st.name}駅` }); return; }
   box.hidden = false;
   $('stName').textContent = `🚉 ${n.st.name}駅`;
   $('stStatus').innerHTML = v
@@ -1064,6 +1116,7 @@ function renderMichi() {
   const n = nearestMichi(), box = $('mcBox');
   if (!n || n.dist > MICHI_RADIUS_M) { box.hidden = true; return; }
   const v = state.michi[n.m.id], block = michiBlock(n);
+  if (v && v.last === today()) { box.hidden = true; doneChips.push({ text: `✅ 🚗 ${n.m.name}`, spot: n.m.id }); return; }
   box.hidden = false;
   $('mcName').textContent = `🚗 ${n.m.name}`;
   $('mcStatus').innerHTML = v
@@ -1495,6 +1548,11 @@ $('dClose').addEventListener('click', closeSpotDetail);
 $('detail').addEventListener('click', e => { if (e.target === $('detail')) closeSpotDetail(); }); // 外側をタップで閉じる
 
 // ===== 画面更新 =====
+let doneChips = [];  // 今日チェックイン済みで、カードの代わりに1行で出すもの（render のたびに作り直す）
+$('doneLine').addEventListener('click', e => {
+  const c = e.target.closest('[data-spot]');
+  if (c) openSpotDetail(c.dataset.spot);
+});
 function showPlace(name, pref, sub) {
   $('place').textContent = name; $('pref').textContent = pref; $('status').innerHTML = '';
   if (sub !== undefined) $('sub').textContent = sub;
@@ -1513,21 +1571,31 @@ function render() {
     const m = current.muni, v = state.visited[keyOf(m)];
     $('place').textContent = m.city;
     $('pref').textContent = [m.pref, m.ward, m.area].filter(Boolean).join(' ');
-    $('status').innerHTML = v
-      ? `<span class="status old">訪問済み ${v.count}回</span>`
+    const doneToday = !!v && v.last === today();
+    $('status').innerHTML = doneToday
+      ? `<span class="status done">✅ 今日チェックイン済み（${v.count}回目）</span>`
+      : v ? `<span class="status old">訪問済み ${v.count}回</span>`
       : '<span class="status new">未訪問！</span>';
+    // 今日チェックイン済みなら大きなボタンは隠す（地図を広く使うため）
+    btn.hidden = doneToday;
     const block = checkinBlock();
     btn.disabled = !!block;
     btn.textContent = block || `チェックイン +${v ? XP_REVISIT : XP_NEW} XP`;
   } else if (current) {
     if (lookupPending) showPlace('市町村を調べています…', '');
     else showPlace('市町村が判定できません', '海上・通信エラーなど（自動で再試行します）');
-    btn.disabled = true; btn.textContent = 'チェックイン';
+    btn.hidden = false; btn.disabled = true; btn.textContent = 'チェックイン';
   }
 
+  doneChips = [];
   renderSpots();
   renderMichi();
   renderStations();
+  // 今日チェックイン済みの観光地・道の駅・駅を1行に（観光地・道の駅はタップで詳細カード）
+  const dl = $('doneLine');
+  dl.hidden = !doneChips.length;
+  dl.innerHTML = doneChips.map(c =>
+    `<span class="done-chip${c.spot ? ' tap' : ''}"${c.spot ? ` data-spot="${esc(c.spot)}"` : ''}>${esc(c.text)}</span>`).join('');
 
   // メニューのページを開いているときは、記録が変わったときだけ作り直す（GPSの更新のたびには作り直さない）
   if (listDirty) { if (!$('page').hidden) renderPage(true); listDirty = false; }
@@ -1672,7 +1740,9 @@ function toggleDemo() {
   else startWatch();
   setTimeout(() => map.invalidateSize(), 50);
 }
-$('demo').addEventListener('click', toggleDemo);
+// テストモードは ☰ メニューから開始・終了（テスト中は赤い帯の「終了」でも終われる）
+$('demo').addEventListener('click', () => { closeDrawer(); toggleDemo(); });
+$('demoEnd').addEventListener('click', () => { if (demo) toggleDemo(); });
 map.on('click', e => { if (demo) setPosition(e.latlng.lat, e.latlng.lng, 0, true); });
 $('reset').addEventListener('click', () => {
   if (confirm('経験値と訪問記録をすべて消します。よろしいですか？')) {
