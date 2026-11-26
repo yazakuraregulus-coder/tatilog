@@ -14,7 +14,9 @@
   html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
     font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; }
   body { display:flex; flex-direction:column; }
-  header { background:var(--main); color:#fff; padding:10px 14px calc(10px) ; padding-top:calc(10px + env(safe-area-inset-top)); }
+  header { background:var(--main); color:#fff; padding:10px 14px calc(10px) ; padding-top:calc(10px + env(safe-area-inset-top));
+    display:flex; align-items:center; gap:10px; }
+  header .hmain { flex:1; min-width:0; }
   .hrow { display:flex; justify-content:space-between; align-items:baseline; }
   .title { font-weight:700; font-size:17px; }
   .lv { font-size:15px; } .lv b { font-size:22px; }
@@ -186,6 +188,11 @@
   .chips { display:flex; gap:6px; overflow-x:auto; padding-bottom:8px; margin-bottom:4px; }
   .chip { flex:none; background:#fff; border:1px solid #cfd6d3; border-radius:16px; padding:6px 12px; font-size:13px; }
   .chip.on { background:var(--main); color:#fff; border-color:var(--main); }
+  /* 検索ページ */
+  .search-box { position:sticky; top:-10px; z-index:1; background:var(--bg); padding:2px 0 8px; }
+  .search-box input { width:100%; font:inherit; font-size:16px; padding:11px 14px; border:2px solid #cfd6d3; border-radius:12px; background:#fff; }
+  .search-box input:focus { outline:none; border-color:var(--main); }
+  #searchResults .line-chip { margin-top:3px; }
   .empty { text-align:center; color:var(--muted); font-size:13px; padding:30px 10px; line-height:1.8; }
   .page .c-bar { height:7px; }
   /* お気に入り */
@@ -260,12 +267,16 @@
 </head>
 <body>
 <header>
-  <div class="hrow">
-    <div class="title"><button id="menuBtn" class="menu-btn" aria-label="メニューを開く">☰</button>🗾 たびログ</div>
-    <div class="lv">Lv <b id="lv">1</b></div>
+  <!-- ☰ はヘッダーの上下中央。名前・Lv・XPバーは右側の列にまとめ、XPバーの左端を 🗾 にそろえる -->
+  <button id="menuBtn" class="menu-btn" aria-label="メニューを開く">☰</button>
+  <div class="hmain">
+    <div class="hrow">
+      <div class="title">🗾 たびログ</div>
+      <div class="lv">Lv <b id="lv">1</b></div>
+    </div>
+    <div class="bar"><div id="barfill"></div></div>
+    <div class="xptext" id="xptext">0 XP</div>
   </div>
-  <div class="bar"><div id="barfill"></div></div>
-  <div class="xptext" id="xptext">0 XP</div>
 </header>
 <div class="demo-banner">🧪 テスト中：地図をタップした場所へ移動（保存なし）<button id="demoEnd">終了</button></div>
 <div id="map"></div>
@@ -300,6 +311,7 @@
     <button data-open="complete">🏆 コンプリート一覧</button>
     <button data-open="favs">⭐ お気に入り一覧</button>
     <button data-open="recent">🕒 最近の訪問</button>
+    <button data-open="search">🔍 検索</button>
     <button data-open="manage">💾 記録の管理</button>
     <button id="demo" class="demo-item">🧪 テストモード</button>
   </nav>
@@ -1407,9 +1419,57 @@ const VIEWS = {
     if (log.some(e => e.at.length <= 10)) html += '<div class="list-note">※ 履歴の機能を入れる前の訪問は、最後に訪問した日だけを表示しています</div>';
     return { title: '🕒 最近の訪問', html };
   },
+  // 検索（観光地・道の駅・鉄道駅を名前の一部で探す）。入力欄はそのままにして、結果（#searchResults）だけ作り直す
+  search(q) {
+    return { title: '🔍 検索', html:
+      `<div class="search-box"><input id="searchInput" type="search" placeholder="名前や市町村名の一部（例：松本、温泉）" ` +
+      `value="${esc(q || '')}" enterkeyhint="search" autocomplete="off" aria-label="検索する言葉"></div>` +
+      `<div id="searchResults">${searchResultsHtml(q)}</div>` };
+  },
   // 記録の管理（保存・読み込み・リセット）
   manage() { renderBackupInfo(); return { title: '💾 記録の管理', html: '' }; },
 };
+
+// ===== 検索 =====
+// 比べるための形にそろえる：全角・半角をそろえ、カタカナはひらがなに、大文字は小文字に、空白は取る
+const normQ = s => String(s || '').normalize('NFKC').toLowerCase()
+  .replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s+/g, '');
+const SEARCH_MAX = 100; // 種類ごとに出す最大件数
+function searchResultsHtml(q) {
+  const nq = normQ(q);
+  if (!nq) return '<div class="empty">観光地・道の駅・鉄道駅を、名前の一部で探せます。<br>市町村名でも探せます（例：「軽井沢」「高崎」）。<br>ひらがな・カタカナは区別しません。</div>';
+  // 名前に入っているものを先に、その中では名前の先頭が合うもの → 都道府県の順（北から）→ 名前の順
+  const score = (name, city) => { const n = normQ(name); return n.startsWith(nq) ? 0 : n.includes(nq) ? 1 : normQ(city).includes(nq) ? 2 : -1; };
+  const pick = (list, nameOf) => list.map(x => ({ x, s: score(nameOf(x), x.city) })).filter(o => o.s >= 0)
+    .sort((a, b) => a.s - b.s || prefRank(a.x.pref) - prefRank(b.x.pref) || (nameOf(a.x) < nameOf(b.x) ? -1 : 1)).map(o => o.x);
+  const more = n => n > SEARCH_MAX ? `<div class="list-note">ほか ${n - SEARCH_MAX} 件。もう少し詳しく入力すると絞り込めます</div>` : '';
+  const sec = (title, list, row) => `<div class="sec-h">${title}（${list.length}件）</div>` +
+    (list.length ? items(list.slice(0, SEARCH_MAX).map(row)) + more(list.length) : '<div class="list-note">見つかりませんでした</div>');
+  const spots = pick(SPOTS, s => s.name);
+  const michi = pick(MICHI.filter(m => !m.spot), m => m.name); // 観光地を兼ねる道の駅は観光地の方に出る
+  const sts = STATIONS ? pick(STATIONS, s => s.name + '駅') : null;
+  const spotRow = s => { const v = state.spots[s.id], t = spotType(s);
+    return item({ mark: v ? '✅' : '・', todo: !v, attrs: `data-spot="${esc(s.id)}"`,
+      name: `${t.icon} ${esc(s.name)}${s.rare ? ' ✨' : ''}${s.michi ? ' 🚗' : ''}${state.favs[s.id] ? ' <span style="color:#f0b400">★</span>' : ''}`,
+      sub: esc([t.label, spotPrefs(s).join('・'), s.city].filter(Boolean).join('・')), right: visitRight(v) }); };
+  const michiRow = m => { const v = state.michi[m.id];
+    return item({ mark: v ? '✅' : '・', todo: !v, attrs: `data-spot="${esc(m.id)}"`,
+      name: `🚗 ${esc(m.name)}${state.favs[m.id] ? ' <span style="color:#f0b400">★</span>' : ''}`,
+      sub: esc([m.pref, m.city].filter(Boolean).join('・')), right: visitRight(v) }); };
+  const stRow = st => stationItem(st, esc([st.pref, st.city].filter(Boolean).join('・')) + '<div>' + lineChips(st) + '</div>');
+  return sec('📍 観光地', spots, spotRow) + sec('🚗 道の駅', michi, michiRow) +
+    (sts ? sec('🚉 鉄道駅', sts, stRow) : '<div class="sec-h">🚉 鉄道駅</div><div class="list-note">駅データを読み込み中…</div>');
+}
+let searchTimer = 0;
+$('pageBody').addEventListener('input', e => {
+  if (e.target.id !== 'searchInput') return;
+  const top = pageStack[pageStack.length - 1];
+  if (top && top.name === 'search') top.arg = e.target.value;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { const r = $('searchResults'); if (r) r.innerHTML = searchResultsHtml(e.target.value); }, 150);
+});
+// Enter（スマホのキーボードの「検索」）でキーボードを閉じて結果を見やすくする
+$('pageBody').addEventListener('keydown', e => { if (e.target.id === 'searchInput' && e.key === 'Enter') e.target.blur(); });
 
 // ===== ページの移動（スマホの「戻る」でも1つ前に戻れるよう、履歴に積む） =====
 let pageStack = [];  // [{ name, arg, scroll }]
@@ -1417,6 +1477,12 @@ function renderPage(keepScroll) {
   const top = pageStack[pageStack.length - 1];
   if (!top) return;
   const body = $('pageBody'), sc = body.scrollTop;
+  // 検索ページは、入力中に記録や駅データが変わっても入力欄を作り直さない（キーボードが閉じないように）。結果だけ更新する
+  if (top.name === 'search' && $('searchResults') && body.contains($('searchResults')) && !body.hidden) {
+    $('searchResults').innerHTML = searchResultsHtml(top.arg);
+    if (keepScroll) body.scrollTop = sc;
+    return;
+  }
   const v = VIEWS[top.name](top.arg);
   $('pageTitle').textContent = v.title;
   const manage = top.name === 'manage';
@@ -1430,9 +1496,11 @@ function openPage(name) {
   pageStack = [{ name }];
   $('page').hidden = false;
   history.pushState({ tabilogPage: 1 }, '');
-  if (name === 'complete') loadStations();
+  if (name === 'complete' || name === 'search') loadStations();
+  if (name === 'search') $('pageBody').innerHTML = ''; // 前の検索ページの入力欄を使い回さない
   renderPage();
   $('pageBody').scrollTop = 0;
+  if (name === 'search') setTimeout(() => { const i = $('searchInput'); if (i) i.focus(); }, 50);
 }
 function pushPage(name, arg) {
   pageStack[pageStack.length - 1].scroll = $('pageBody').scrollTop;
