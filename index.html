@@ -188,6 +188,43 @@
   .chips { display:flex; gap:6px; overflow-x:auto; padding-bottom:8px; margin-bottom:4px; }
   .chip { flex:none; background:#fff; border:1px solid #cfd6d3; border-radius:16px; padding:6px 12px; font-size:13px; }
   .chip.on { background:var(--main); color:#fff; border-color:var(--main); }
+  /* メダル（丸の中に RATE。銅・銀・金・プラチナ） */
+  .medal { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%;
+    font-size:11px; font-weight:800; line-height:1; vertical-align:middle; font-variant-numeric:tabular-nums; flex:none;
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.5), 0 1px 2px rgba(0,0,0,.3); }
+  .medal.big { width:44px; height:44px; font-size:18px; box-shadow:inset 0 0 0 3px rgba(255,255,255,.55), 0 1px 4px rgba(0,0,0,.35); }
+  .m-bronze { background:linear-gradient(135deg,#e0a06c,#a0602f); color:#fff; }
+  .m-silver { background:linear-gradient(135deg,#f1f3f5,#a3abb4); color:#3a4048; }
+  .m-gold { background:linear-gradient(135deg,#ffe57a,#d4a017); color:#5a3d00; }
+  .m-platinum { background:linear-gradient(135deg,#ffffff,#cfe6f5 45%,#93b9d8); color:#1f3f5b;
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.9), 0 0 6px rgba(110,180,255,.9); }
+  .medal.big.m-platinum { box-shadow:inset 0 0 0 3px rgba(255,255,255,.9), 0 0 10px rgba(110,180,255,.95); }
+  .i-name .medal { margin-left:2px; }
+  .i-mark .medal { margin-left:-2px; }
+  .item:has(.i-mark .medal) .i-mark { width:24px; }
+  /* チェックインのお知らせのメダル */
+  .toast-medal { display:flex; align-items:center; justify-content:center; gap:10px; margin:8px 0 4px; font-size:14px; text-align:left; }
+  /* 詳細カードのメダル欄 */
+  .detail-medal { margin-top:10px; background:#fbf7ec; border:1px solid #eadfbf; border-radius:10px; padding:10px 12px; font-size:13px; }
+  .detail-medal[hidden] { display:none; }
+  .dm-head { font-weight:700; margin-bottom:6px; }
+  .dm-best { display:flex; align-items:center; gap:10px; }
+  .dm-best-name { font-size:15px; font-weight:800; }
+  .dm-best-rate { font-size:13px; color:var(--muted); font-weight:700; }
+  .dm-count { margin-top:8px; font-size:12px; color:var(--muted); }
+  .dm-list { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
+  .dm-none { color:var(--muted); }
+  .dm-next { margin-top:8px; font-size:11px; color:#8a6d1f; }
+  /* 獲得メダルのページ */
+  .medal-sum { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-bottom:6px; }
+  .ms-cell { background:#fff; border-radius:12px; padding:10px 4px; text-align:center; box-shadow:0 1px 3px rgba(0,0,0,.06);
+    display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .ms-cell.zero { opacity:.5; }
+  .ms-label { font-size:13px; font-weight:800; margin-top:4px; }
+  .ms-range { font-size:10px; color:var(--muted); }
+  .ms-num { font-size:22px; font-weight:800; color:var(--main); font-variant-numeric:tabular-nums; }
+  .ms-num small { font-size:11px; margin-left:1px; }
+  .medal-help { margin-top:14px; line-height:1.7; }
   /* 検索ページ */
   .search-box { position:sticky; top:-10px; z-index:1; background:var(--bg); padding:2px 0 8px; }
   .search-box input { width:100%; font:inherit; font-size:16px; padding:11px 14px; border:2px solid #cfd6d3; border-radius:12px; background:#fff; }
@@ -309,6 +346,7 @@
   <nav class="drawer-panel" aria-label="メニュー">
     <div class="drawer-head">🗾 たびログ</div>
     <button data-open="complete">🏆 コンプリート一覧</button>
+    <button data-open="medals">🏅 獲得メダル</button>
     <button data-open="favs">⭐ お気に入り一覧</button>
     <button data-open="recent">🕒 最近の訪問</button>
     <button data-open="search">🔍 検索</button>
@@ -355,6 +393,8 @@
       <dt>獲得XP</dt><dd id="dXp"></dd>
       <dt>現在地から</dt><dd id="dDist"></dd>
     </dl>
+    <!-- メダル（観光地だけ。道の駅・駅には無い） -->
+    <div id="dMedal" class="detail-medal" hidden></div>
     <div class="memo">
       <label for="dMemo">📝 思い出メモ</label>
       <textarea id="dMemo" rows="3" maxlength="500"></textarea>
@@ -412,6 +452,25 @@ const spotIndex = {};   // id → 観光地
 const spotById = id => spotIndex[id];
 const spotPrefs = s => (s && (s.prefs || [s.pref])) || [];
 const XP_RARE_NEW = 150; // レア枠の観光地の初訪問（再訪は通常と同じ XP_SPOT_REVISIT）
+
+// ===== メダル（観光地のチェックインごとに1枚。RATE 1〜99 で、数字が小さいほどレア。レアスポットも同じ） =====
+// 記録は state.spots[id].medals = [{ r: RATE, d: 'YYYY-MM-DD' }, …]（入手したメダルを全部残す。表示はベスト＝一番小さい RATE）
+const MEDAL_TIERS = [
+  { key: 'platinum', label: 'プラチナ', max: 9 },
+  { key: 'gold', label: '金', max: 29 },
+  { key: 'silver', label: '銀', max: 59 },
+  { key: 'bronze', label: '銅', max: 99 },
+];
+const medalTier = r => MEDAL_TIERS.find(t => r <= t.max) || MEDAL_TIERS[3];
+// n 回目の訪問で抽選する RATE の上限（1〜上限のどれも同じ確率）：1回目 99、2回目 79、3回目以降 49
+const medalRange = n => n <= 1 ? 99 : n === 2 ? 79 : 49;
+const drawMedal = n => 1 + Math.floor(Math.random() * medalRange(n));
+const medalsOf = v => (v && Array.isArray(v.medals)) ? v.medals : [];
+const bestMedal = v => { const m = medalsOf(v); return m.length ? Math.min(...m.map(x => x.r)) : null; };
+const medalName = r => `${medalTier(r).label}メダル`;
+// メダルの丸（中に RATE）。size：'' 小さい（一覧）、'big'（詳細・お知らせ）
+const medalBadge = (r, size) => { const t = medalTier(r);
+  return `<span class="medal m-${t.key}${size ? ' ' + size : ''}" title="${t.label}メダル RATE ${r}">${r}</span>`; };
 
 // ===== 道の駅（spots.json の michi に入っている。観光地を兼ねる道の駅は spot に観光地の id を持つ） =====
 // 観光地を兼ねる道の駅は、観光地としてチェックインする（XPも観光地のまま）。コンプリート一覧では観光地と道の駅の両方に数える
@@ -471,8 +530,10 @@ function legacyLog(s) {
 }
 const LOG_MAX = 500; // 履歴は新しい500件まで残す
 // チェックインを履歴に足す（日時は端末の時刻「YYYY-MM-DD HH:MM:SS」）
-function addLog(type, id, name, pref, xp) {
-  state.log.push({ type, id, name, pref: pref || '', at: new Date().toLocaleString('sv-SE'), xp });
+function addLog(type, id, name, pref, xp, medal) {
+  const e = { type, id, name, pref: pref || '', at: new Date().toLocaleString('sv-SE'), xp };
+  if (medal) e.medal = medal; // 観光地で入手したメダルの RATE
+  state.log.push(e);
   if (state.log.length > LOG_MAX) state.log.splice(0, state.log.length - LOG_MAX);
 }
 // テストモード中は保存しない。記録が変わったので一覧は作り直す
@@ -980,14 +1041,19 @@ $('spotCheckin').addEventListener('click', () => {
     gain = XP_SPOT_REVISIT; title = 'また来ました';
     v.last = today(); v.count++;
   }
-  addLog('spot', s.id, s.name, s.pref, gain);
+  // メダルの抽選（何回目の訪問かで RATE の範囲が変わる。機能を入れる前の訪問も回数には数える）
+  const rec = state.spots[s.id], prevBest = bestMedal(rec), rate = drawMedal(rec.count);
+  (rec.medals = medalsOf(rec)).push({ r: rate, d: today() });
+  addLog('spot', s.id, s.name, s.pref, gain, rate);
   const before = levelOf(state.xp);
   state.xp += gain;
   save();
   const after = levelOf(state.xp);
   toast(`${title}<br>${esc(s.name)}<div class="big">+${gain} XP</div>` +
+        `<div class="toast-medal">${medalBadge(rate, 'big')}<div><b>${medalName(rate)}</b>　RATE ${rate}` +
+        (prevBest !== null && rate < prevBest ? '<br>🎉 ベスト更新！' : '') + '</div></div>' +
         (after > before ? `<div>⬆ レベルアップ！ Lv${after}</div>` : '') +
-        (demo ? '<div style="font-size:12px;opacity:.8">テストモードのため保存されません</div>' : ''));
+        (demo ? '<div style="font-size:12px;opacity:.8">テストモードのため保存されません</div>' : ''), 3500);
   render();
 });
 
@@ -1224,9 +1290,11 @@ const lineChip = l => `<span class="line-chip"><i style="background:${esc(l.colo
 // 観光地の行（タップで詳細カード）
 const spotItem = (s, v) => item({
   mark: v ? '✅' : '・', todo: !v, attrs: `data-spot="${esc(s.id)}"`,
-  name: `${spotType(s).icon} ${esc(s.name)}${s.rare ? ' ✨' : ''}${state.favs[s.id] ? ' <span style="color:#f0b400">★</span>' : ''}${v && v.memo ? ' 📝' : ''}`,
+  name: `${spotType(s).icon} ${esc(s.name)}${s.rare ? ' ✨' : ''}${state.favs[s.id] ? ' <span style="color:#f0b400">★</span>' : ''}${v && v.memo ? ' 📝' : ''}${bestBadge(v)}`,
   sub: esc([spotType(s).label, s.city].filter(Boolean).join('・')), right: visitRight(v),
 });
+// 一覧の名前の後ろに付ける、ベストメダルの小さな丸（メダルが無ければ何も付けない）
+const bestBadge = v => { const b = bestMedal(v); return b === null ? '' : ' ' + medalBadge(b); };
 // 駅の行（タップで地図をその駅へ）
 const stationItem = (st, sub) => {
   const v = state.stations[st.id];
@@ -1386,7 +1454,7 @@ const VIEWS = {
       const s = mi ? michiById(id) : spotById(id), v = mi ? state.michi[id] : state.spots[id];
       const t = mi ? MICHI_TYPE : spotType(s), name = s ? s.name : v.name, city = s ? s.city : (v.city || '');
       return item({ mark: '<span style="color:#f0b400">★</span>', attrs: `data-spot="${esc(id)}"`,
-        name: `${t.icon} ${esc(name)}${v && v.memo ? ' 📝' : ''}`,
+        name: `${t.icon} ${esc(name)}${v && v.memo ? ' 📝' : ''}${mi ? '' : bestBadge(v)}`,
         sub: esc(`${prefOf(id)} ${city}`.trim() + `・登録 ${state.favs[id]}`),
         right: v ? `✅ 訪問済み<br>${v.count}回` : '未訪問' });
     })) };
@@ -1413,11 +1481,40 @@ const VIEWS = {
       const attrs = (e.type === 'spot' || e.type === 'michi') ? `data-spot="${esc(e.id)}"` : e.type === 'station' ? `data-station="${esc(e.id)}"` : '';
       rows.push(item({ mark: icon, attrs, name: esc(e.name) + (e.type === 'station' ? '駅' : ''),
         sub: esc([label, e.pref].filter(Boolean).join('・')),
-        right: (e.at.length > 10 ? e.at.slice(11, 16) : '時刻不明') + (typeof e.xp === 'number' ? `<br>+${e.xp} XP` : '') }));
+        right: (e.at.length > 10 ? e.at.slice(11, 16) : '時刻不明') + (typeof e.xp === 'number' ? `<br>+${e.xp} XP` : '') +
+          (e.medal ? `<br>${medalBadge(e.medal)}` : '') }));
     });
     flush();
     if (log.some(e => e.at.length <= 10)) html += '<div class="list-note">※ 履歴の機能を入れる前の訪問は、最後に訪問した日だけを表示しています</div>';
     return { title: '🕒 最近の訪問', html };
+  },
+  // 獲得メダル：種類ごとの枚数（入手したメダル全部）と、観光地ごとのベストメダルの一覧（RATE の小さい順）
+  // filter = 'all' ／ 'platinum' 'gold' 'silver' 'bronze'（ベストメダルの種類で絞り込む）
+  medals(filter) {
+    filter = filter || 'all';
+    const all = Object.entries(state.spots).flatMap(([id, v]) => medalsOf(v).map(m => ({ id, r: m.r })));
+    const spots = Object.entries(state.spots).map(([id, v]) => ({ id, v, best: bestMedal(v) })).filter(x => x.best !== null);
+    if (!all.length) return { title: '🏅 獲得メダル', html: '<div class="empty">まだメダルがありません。<br>観光地にチェックインすると、RATE 1〜99 のメダルを1枚入手できます。<br>数字が小さいほどレアで、同じ観光地に何度も行くほどレアなメダルが出やすくなります。</div>' +
+      medalHelp() };
+    const sum = MEDAL_TIERS.map(t => { const n = all.filter(m => medalTier(m.r) === t).length;
+      const lo = { platinum: 1, gold: 10, silver: 30, bronze: 60 }[t.key];
+      return `<div class="ms-cell${n ? '' : ' zero'}"><span class="medal big m-${t.key}"></span>` +
+        `<div class="ms-label">${t.label}</div><div class="ms-range">RATE ${lo}〜${t.max}</div><div class="ms-num">${n}<small>枚</small></div></div>`; }).join('');
+    const top = Math.min(...all.map(m => m.r));
+    const chips = '<div class="chips">' + [['all', `すべて（${spots.length}）`]].concat(MEDAL_TIERS.map(t =>
+      [t.key, `${t.label}（${spots.filter(x => medalTier(x.best) === t).length}）`])).map(([k, label]) =>
+      `<button class="chip${filter === k ? ' on' : ''}" data-filter="${k}">${label}</button>`).join('') + '</div>';
+    const shown = spots.filter(x => filter === 'all' || medalTier(x.best).key === filter)
+      .sort((a, b) => a.best - b.best || medalsOf(b.v).length - medalsOf(a.v).length);
+    const rows = shown.map(({ id, v, best }) => { const s = spotById(id), t = spotType(s);
+      return item({ mark: medalBadge(best), attrs: `data-spot="${esc(id)}"`, name: `${t.icon} ${esc(s ? s.name : v.name)}${s && s.rare ? ' ✨' : ''}`,
+        sub: esc([`ベスト ${medalName(best)} RATE ${best}`, s ? spotPrefs(s).join('・') : v.pref].filter(Boolean).join('・')),
+        right: `${medalsOf(v).length}枚<br>${v.count}回` }); });
+    return { title: '🏅 獲得メダル', html:
+      `<div class="medal-sum">${sum}</div>` +
+      `<div class="list-note">入手したメダル 全${all.length}枚・メダルのある観光地 ${spots.length}か所・一番レアなメダル RATE ${top}</div>` +
+      `<div class="sec-h">観光地ごとのベストメダル</div>` + chips + (rows.length ? items(rows) : '<div class="empty">この種類のメダルはまだありません</div>') +
+      medalHelp() };
   },
   // 検索（観光地・道の駅・鉄道駅を名前の一部で探す）。入力欄はそのままにして、結果（#searchResults）だけ作り直す
   search(q) {
@@ -1429,6 +1526,10 @@ const VIEWS = {
   // 記録の管理（保存・読み込み・リセット）
   manage() { renderBackupInfo(); return { title: '💾 記録の管理', html: '' }; },
 };
+
+// メダルのしくみの説明（獲得メダルのページの下）
+const medalHelp = () => '<div class="list-note medal-help">🏅 観光地にチェックインするたびにメダルを1枚入手（1日1回）。RATE は 1〜99 で、数字が小さいほどレア。<br>' +
+  'プラチナ 1〜9／金 10〜29／銀 30〜59／銅 60〜99。<br>1回目は 1〜99、2回目は 1〜79、3回目以降は 1〜49 から抽選するので、同じ観光地に何度も行くほどレアなメダルが出やすくなります。</div>';
 
 // ===== 検索 =====
 // 比べるための形にそろえる：全角・半角をそろえ、カタカナはひらがなに、大文字は小文字に、空白は取る
@@ -1450,7 +1551,7 @@ function searchResultsHtml(q) {
   const sts = STATIONS ? pick(STATIONS, s => s.name + '駅') : null;
   const spotRow = s => { const v = state.spots[s.id], t = spotType(s);
     return item({ mark: v ? '✅' : '・', todo: !v, attrs: `data-spot="${esc(s.id)}"`,
-      name: `${t.icon} ${esc(s.name)}${s.rare ? ' ✨' : ''}${s.michi ? ' 🚗' : ''}${state.favs[s.id] ? ' <span style="color:#f0b400">★</span>' : ''}`,
+      name: `${t.icon} ${esc(s.name)}${s.rare ? ' ✨' : ''}${s.michi ? ' 🚗' : ''}${state.favs[s.id] ? ' <span style="color:#f0b400">★</span>' : ''}${bestBadge(v)}`,
       sub: esc([t.label, spotPrefs(s).join('・'), s.city].filter(Boolean).join('・')), right: visitRight(v) }); };
   const michiRow = m => { const v = state.michi[m.id];
     return item({ mark: v ? '✅' : '・', todo: !v, attrs: `data-spot="${esc(m.id)}"`,
@@ -1571,6 +1672,7 @@ function openSpotDetail(id) {
   $('dLast').textContent = v ? v.last : '―';
   $('dCount').textContent = `${v ? v.count : 0}回`;
   $('dXp').textContent = `${isM ? michiXp(v) : spotXp(s, v)} XP`;
+  renderDetailMedal(isM, v);
   renderFavButton(id);
   // 思い出メモ（訪問済みの観光地だけ書ける）
   detailId = id;
@@ -1610,6 +1712,29 @@ $('dFav').addEventListener('click', () => {
     (demo ? '<div style="font-size:12px;opacity:.8">テストモードのため保存されません</div>' : ''));
   render();
 });
+
+// 詳細カードのメダル欄：ベスト（大きな丸）・入手したメダル（RATE の小さい順）・次の訪問で抽選する範囲
+function renderDetailMedal(isM, v) {
+  const box = $('dMedal');
+  box.hidden = isM;
+  if (isM) return;
+  const ms = medalsOf(v).slice().sort((a, b) => a.r - b.r);
+  const next = medalRange((v ? v.count : 0) + 1);
+  const nextText = `次のチェックインは RATE 1〜${next} から抽選${v && v.last === today() ? '（明日から）' : ''}`;
+  if (!ms.length) {
+    box.innerHTML = '<div class="dm-head">🏅 メダル</div><div class="dm-none">' +
+      (v ? 'まだありません（メダル機能を入れる前の訪問のため）' : 'チェックインするとメダルを1枚入手できます') +
+      `</div><div class="dm-next">${nextText}</div>`;
+    return;
+  }
+  const best = ms[0].r, cnt = MEDAL_TIERS.map(t => [t, ms.filter(m => medalTier(m.r) === t).length]).filter(x => x[1]);
+  box.innerHTML = '<div class="dm-head">🏅 メダル</div>' +
+    `<div class="dm-best">${medalBadge(best, 'big')}<div><div class="dm-best-name">ベスト：${medalName(best)}</div>` +
+    `<div class="dm-best-rate">RATE ${best}</div></div></div>` +
+    `<div class="dm-count">全${ms.length}枚（${cnt.map(([t, n]) => `${t.label}${n}`).join('・')}）</div>` +
+    `<div class="dm-list">${ms.map(m => medalBadge(m.r)).join('')}</div>` +
+    `<div class="dm-next">${nextText}</div>`;
+}
 
 // この観光地・道の駅でこれまでに得たXP（初訪問 + 再訪の回数分）
 const spotXp = (s, v) => v ? (s && s.rare ? XP_RARE_NEW : XP_SPOT_NEW) + (v.count - 1) * XP_SPOT_REVISIT : 0;
@@ -1767,6 +1892,11 @@ function parseBackup(text) {
       spots[id] = { name: v.name, pref: typeof v.pref === 'string' ? v.pref : '', first: v.first, last: v.last, count: v.count };
       if (typeof v.city === 'string') spots[id].city = v.city;
       if (typeof v.memo === 'string' && v.memo) spots[id].memo = v.memo.slice(0, 500);
+      // メダル（メダル機能より前のファイルには無い）。RATE が 1〜99 の整数のものだけ残す
+      if (Array.isArray(v.medals)) {
+        const ms = v.medals.filter(m => m && Number.isInteger(m.r) && m.r >= 1 && m.r <= 99 && typeof m.d === 'string').map(m => ({ r: m.r, d: m.d }));
+        if (ms.length) spots[id].medals = ms;
+      }
     }
   }
   // 駅の記録（駅機能より前に保存したファイルには無い）
@@ -1801,16 +1931,16 @@ function parseBackup(text) {
   s.log = Array.isArray(j.log)
     ? j.log.filter(e => e && ['muni', 'spot', 'station', 'michi'].includes(e.type) && typeof e.id === 'string' &&
         typeof e.name === 'string' && typeof e.at === 'string').slice(-LOG_MAX)
-        .map(e => ({ type: e.type, id: e.id, name: e.name, pref: typeof e.pref === 'string' ? e.pref : '', at: e.at,
-          xp: typeof e.xp === 'number' ? e.xp : undefined }))
+        .map(e => Object.assign({ type: e.type, id: e.id, name: e.name, pref: typeof e.pref === 'string' ? e.pref : '', at: e.at,
+          xp: typeof e.xp === 'number' ? e.xp : undefined }, Number.isInteger(e.medal) && e.medal >= 1 && e.medal <= 99 ? { medal: e.medal } : {}))
     : legacyLog(s);
   return s;
 }
 
 let toastTimer;
-function toast(html) {
+function toast(html, ms) {
   const t = $('toast'); t.innerHTML = html; t.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), ms || 2200);
 }
 
 // ===== ボタン類 =====
