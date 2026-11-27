@@ -89,7 +89,10 @@
   .spot-cluster.rare { border-color:#d4a017; box-shadow:0 0 0 3px rgba(212,160,23,.6), 0 1px 5px rgba(0,0,0,.4); }
   .spot.rare { border-color:#d4a017; background:#fffbea; }
   .spot.rare .spot-name { color:#9a6b00; }
-  .detail-icon.rare { border:3px solid #d4a017; background:#fff8dc; }
+  .detail-icon.rare { border:3px solid #d4a017; background:#fff8dc; box-shadow:0 0 0 2px rgba(212,160,23,.35), 0 1px 5px rgba(0,0,0,.4); }
+  /* 詳細カードのアイコンも、チェックイン済みなら地図の印と同じ黄緑のふち（レアは金の枠の外側に黄緑の輪） */
+  .detail-icon.visited { border:3px solid #7cb342; background:#f3fae9; }
+  .detail-icon.rare.visited { border:3px solid #d4a017; background:#fff8dc; box-shadow:0 0 0 3px #7cb342, 0 1px 5px rgba(0,0,0,.4); }
   /* 観光地のフキダシ（タップで詳細） */
   .spot-pop { cursor:pointer; text-align:center; }
   .spot-pop b { display:block; font-size:14px; }
@@ -101,8 +104,8 @@
   .detail-card { background:#fff; width:100%; max-width:520px; border-radius:16px 16px 0 0;
     padding:16px 16px calc(16px + env(safe-area-inset-bottom)); max-height:85vh; overflow:auto; }
   .detail-head { display:flex; gap:12px; align-items:center; }
-  .detail-icon { width:48px; height:48px; flex:none; border:2px solid #7b4fc9; border-radius:50%;
-    display:flex; align-items:center; justify-content:center; font-size:26px; }
+  .detail-icon { width:48px; height:48px; flex:none; border:2px solid #7b4fc9; border-radius:50%; background:#fff;
+    box-shadow:0 1px 4px rgba(0,0,0,.35); display:flex; align-items:center; justify-content:center; font-size:26px; line-height:1; }
   .detail-icon.t-temple { color:#b3261e; font-weight:700; }
   .detail-name { font-size:19px; font-weight:700; }
   .detail-type { font-size:12px; color:var(--muted); }
@@ -254,8 +257,9 @@
   #mcCheckin { width:100%; background:#3B6D11; color:#fff; font-size:16px; font-weight:700; }
   #mcCheckin:disabled { background:#c9cfcc; }
   /* 道の駅の地図の印（角丸の四角。観光地の丸と形で見分ける。※ position は指定しない） */
-  .michi-marker { background:#fff; border:2px solid #7b4fc9; border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,.35);
-    display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:800; color:#5a32a3; line-height:1; }
+  /* 大きさは 24px（2026-11-27 に 30px から小さくした。観光地の丸は 30px のまま） */
+  .michi-marker { background:#fff; border:2px solid #7b4fc9; border-radius:6px; box-shadow:0 1px 4px rgba(0,0,0,.35);
+    display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:800; color:#5a32a3; line-height:1; }
   .michi-marker.visited { border:3px solid #7cb342; background:#f3fae9; color:#33691e; }
   .michi-marker.today { opacity:.5; }
   .michi-marker.fav::after { content:'★'; position:absolute; right:-6px; top:-7px; font-size:13px; color:#f0b400; text-shadow:0 0 2px #fff, 0 0 2px #fff; }
@@ -263,7 +267,9 @@
     box-shadow:0 1px 5px rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px; }
   .michi-cluster.visited { background:#7cb342; }
   .map-toggle.michi-toggle { color:#3B6D11; }
-  .detail-icon.michi { border-radius:10px; font-size:22px; }
+  /* 詳細カードの道の駅のアイコン：地図の印と同じ角丸の四角に「道」（大きさの比率も地図の印に合わせる） */
+  .detail-icon.michi { border-radius:12px; font-size:24px; font-weight:800; color:#5a32a3; }
+  .detail-icon.michi.visited { color:#33691e; }
   #stCheckin:disabled { background:#c9cfcc; }
   .st-lines { margin-top:2px; }
   .line-chip { display:inline-flex; align-items:center; gap:3px; font-size:11px; margin:2px 6px 0 0; white-space:nowrap; }
@@ -635,7 +641,7 @@ function michiIcon(visited, todayVisited, fav) {
   return L.divIcon({
     className: `michi-marker${visited ? ' visited' : ''}${todayVisited ? ' today' : ''}${fav ? ' fav' : ''}`,
     html: '<span>道</span>',
-    iconSize: [30, 30], iconAnchor: [15, 15],
+    iconSize: [24, 24], iconAnchor: [12, 12],
   });
 }
 // 近くにある道の駅は、観光地とは別の四角い丸にまとめる
@@ -1653,7 +1659,8 @@ function openSpotDetail(id) {
   if (!s && !v) return;
   const t = isM ? MICHI_TYPE : spotType(s);
   $('dIcon').textContent = isM ? '道' : t.icon;
-  $('dIcon').className = isM ? 'detail-icon michi' : 'detail-icon t-' + ((s && s.type) || 'other') + (s && s.rare ? ' rare' : '');
+  $('dIcon').className = (isM ? 'detail-icon michi' : 'detail-icon t-' + ((s && s.type) || 'other') + (s && s.rare ? ' rare' : '')) +
+    (v ? ' visited' : ''); // チェックイン済みなら地図の印と同じ黄緑のふち
   $('dName').textContent = s ? s.name : v.name;
   const pref = s ? (isM ? s.pref : spotPrefs(s).join('・')) : (v && v.pref) || '', city = (s && s.city) || (v && v.city) || '';
   $('dType').textContent = [s && s.rare ? '✨ レアスポット' : '', t.label, s && s.michi ? '🚗 道の駅' : '', (pref + ' ' + city).trim()]
