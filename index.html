@@ -263,8 +263,9 @@
   .michi-marker.visited { border:3px solid #7cb342; background:#f3fae9; color:#33691e; }
   .michi-marker.today { opacity:.5; }
   .michi-marker.fav::after { content:'★'; position:absolute; right:-6px; top:-7px; font-size:13px; color:#f0b400; text-shadow:0 0 2px #fff, 0 0 2px #fff; }
-  .michi-cluster { background:#7b4fc9; color:#fff; border:3px solid rgba(255,255,255,.9); border-radius:9px;
-    box-shadow:0 1px 5px rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px; }
+  /* まとめた道の駅の四角（26px。2026-11-27 に 32px から小さくした） */
+  .michi-cluster { background:#7b4fc9; color:#fff; border:2px solid rgba(255,255,255,.9); border-radius:7px;
+    box-shadow:0 1px 5px rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:12px; }
   .michi-cluster.visited { background:#7cb342; }
   .map-toggle.michi-toggle { color:#3B6D11; }
   /* 詳細カードの道の駅のアイコン：地図の印と同じ角丸の四角に「道」（大きさの比率も地図の印に合わせる） */
@@ -651,7 +652,7 @@ const michiLayer = L.markerClusterGroup
       iconCreateFunction: cluster => {
         const ms = cluster.getAllChildMarkers();
         return L.divIcon({ className: 'michi-cluster' + (ms.every(m => m.visited) ? ' visited' : ''),
-          html: `<span>${ms.length}</span>`, iconSize: [32, 32] });
+          html: `<span>${ms.length}</span>`, iconSize: [26, 26] });
       },
     })
   : L.layerGroup();
@@ -1425,12 +1426,27 @@ const VIEWS = {
     return { title: `${p}の鉄道駅`, html: `<div class="sec-h">${cNum(n, list.length, '駅')}　タップで地図に表示</div>` +
       items(list.map(st => stationItem(st, lineChips(st)))) };
   },
-  // 鉄道路線の一覧
+  // 鉄道路線：JR線／私鉄／その他 の3つにまとめる（2026-11-27。分類は stations.json の lines[].kind）
   lines() {
     if (!STATIONS) return { title: '🚉 鉄道路線', html: '<div class="empty">駅データを読み込み中…</div>' };
     return { title: '🚉 鉄道路線', html:
       `<div class="list-note">いまは${esc(STATION_AREA || '一部の地域')}内の駅だけです（県をまたぐ路線は、その範囲の駅数）</div>` +
-      LINES.map(l => statRow('line', l.id, `${lineChip(l)}${esc(l.label)}`,
+      LINE_KINDS.map(k => { const ls = LINES.filter(l => lineKind(l) === k.key);
+        if (!ls.length) return '';
+        const sts = [...new Set(ls.flatMap(l => l.st))];
+        return statRow('lineGroup', k.key, esc(k.label), [
+          { icon: '🏁', n: ls.filter(l => l.st.every(id => state.stations[id])).length, total: ls.length, unit: '路線', color: STAT_COLOR.station },
+          { icon: '🚉', n: sts.filter(id => state.stations[id]).length, total: sts.length, unit: '駅', color: STAT_COLOR.station },
+        ], k.note); }).join('') +
+      '<div class="list-note">🏁＝全駅制覇した路線。乗換駅はそれぞれの分類に数えます</div>' };
+  },
+  // 分類ごとの路線の一覧
+  lineGroup(kind) {
+    if (!STATIONS) return { title: '🚉 鉄道路線', html: '<div class="empty">駅データを読み込み中…</div>' };
+    const k = LINE_KINDS.find(x => x.key === kind) || LINE_KINDS[0];
+    const ls = LINES.filter(l => lineKind(l) === k.key);
+    return { title: k.label, html: (k.note ? `<div class="list-note">${esc(k.note)}</div>` : '') +
+      ls.map(l => statRow('line', l.id, `${lineChip(l)}${esc(l.label)}`,
         [{ icon: '🚉', n: l.st.filter(id => state.stations[id]).length, total: l.st.length, unit: '駅', color: l.color }])).join('') };
   },
   line(id) {
@@ -1536,6 +1552,15 @@ const VIEWS = {
 // メダルのしくみの説明（獲得メダルのページの下）
 const medalHelp = () => '<div class="list-note medal-help">🏅 観光地にチェックインするたびにメダルを1枚入手（1日1回）。RATE は 1〜99 で、数字が小さいほどレア。<br>' +
   'プラチナ 1〜9／金 10〜29／銀 30〜59／銅 60〜99。<br>1回目は 1〜99、2回目は 1〜79、3回目以降は 1〜49 から抽選するので、同じ観光地に何度も行くほどレアなメダルが出やすくなります。</div>';
+
+// 鉄道路線の分類（国土数値情報の事業者種別：JR（新幹線・在来線）／民営鉄道＝私鉄／第三セクター・公営＝その他）
+const LINE_KINDS = [
+  { key: 'jr', label: '🚆 JR線', note: '' },
+  { key: 'private', label: '🚃 私鉄', note: '東武・西武などの民営の鉄道（東京メトロ・筑波山ケーブルカーを含む）' },
+  { key: 'other', label: '🚋 その他', note: '第三セクターの鉄道（しなの鉄道・つくばエクスプレス・ニューシャトルなど）' },
+];
+// stations.json に kind が無い古いデータは、id が jr- で始まれば JR線、それ以外は私鉄として扱う
+const lineKind = l => l.kind || (l.id.startsWith('jr-') ? 'jr' : 'private');
 
 // ===== 検索 =====
 // 比べるための形にそろえる：全角・半角をそろえ、カタカナはひらがなに、大文字は小文字に、空白は取る
