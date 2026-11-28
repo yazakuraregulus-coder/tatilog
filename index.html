@@ -243,6 +243,25 @@
   .fav-btn.on { background:#fff6d6; }
   .spot-marker.fav::after { content:'★'; position:absolute; right:-6px; top:-7px; font-size:13px; color:#f0b400;
     text-shadow:0 0 2px #fff, 0 0 2px #fff; filter:none; }
+  /* 今週のボーナス観光地（オレンジのふちがゆっくり光り、左上に 🎁。レアは金の枠のまま。※ position は指定しない） */
+  .spot-marker.bonus { border:3px solid #ff7a00; animation:bonusPulse 1.6s ease-out infinite; }
+  .spot-marker.rare.bonus { border-color:#d4a017; }
+  .spot-marker.bonus::before { content:'🎁'; position:absolute; left:-8px; top:-9px; font-size:13px; filter:drop-shadow(0 0 1px #fff); }
+  @keyframes bonusPulse {
+    0% { box-shadow:0 0 0 0 rgba(255,122,0,.75), 0 1px 4px rgba(0,0,0,.35); }
+    70% { box-shadow:0 0 0 9px rgba(255,122,0,0), 0 1px 4px rgba(0,0,0,.35); }
+    100% { box-shadow:0 0 0 0 rgba(255,122,0,0), 0 1px 4px rgba(0,0,0,.35); } }
+  .spot-cluster.bonus::after { content:'🎁'; position:absolute; left:-7px; top:-9px; font-size:13px; filter:drop-shadow(0 0 1px #fff); }
+  /* 案内カード・詳細カード・お知らせのボーナス表示 */
+  .spot.bonus { border-color:#ff7a00; background:#fff4e8; }
+  .bonus-tag { display:inline-block; background:#ff7a00; color:#fff; font-size:11px; font-weight:700; border-radius:8px; padding:1px 7px; margin-right:4px; }
+  .detail-bonus { margin-top:10px; padding:6px 10px; border-radius:8px; font-size:13px; font-weight:700; line-height:1.5;
+    background:#fff4e8; color:#b35300; border:1px solid #ffc999; }
+  .detail-bonus.used { background:#f3f3f3; color:#777; border-color:#ddd; font-weight:400; }
+  .detail-bonus[hidden] { display:none; }
+  .toast-bonus { margin:4px 0; font-weight:700; color:#ffd08a; }
+  .dm-b { display:inline-flex; align-items:flex-start; }
+  .dm-b i { font-style:normal; font-size:10px; margin-left:-4px; }
   /* 注意：.spot-marker に position を指定しないこと。Leaflet のアイコンは position:absolute で置かれていて、
      relative などで上書きすると、表示中のアイコンの数に応じて位置がずれる（★の ::after は absolute のままで正しく付く） */
   /* 駅の案内カード */
@@ -353,6 +372,7 @@
   <nav class="drawer-panel" aria-label="メニュー">
     <div class="drawer-head">🗾 たびログ</div>
     <button data-open="complete">🏆 コンプリート一覧</button>
+    <button data-open="bonus">🎁 今週のボーナス</button>
     <button data-open="medals">🏅 獲得メダル</button>
     <button data-open="favs">⭐ お気に入り一覧</button>
     <button data-open="recent">🕒 最近の訪問</button>
@@ -391,6 +411,7 @@
       <button id="dFav" class="fav-btn" aria-pressed="false">☆<small>お気に入り</small></button>
     </div>
     <div id="dWh" class="detail-wh" hidden></div>
+    <div id="dBonus" class="detail-bonus" hidden></div>
     <p id="dDesc" class="detail-desc"></p>
     <dl class="detail-rows">
       <dt>状態</dt><dd id="dStatus"></dd>
@@ -472,14 +493,69 @@ const MEDAL_TIERS = [
 ];
 const medalTier = r => MEDAL_TIERS.find(t => r <= t.max) || MEDAL_TIERS[3];
 // n 回目の訪問で抽選する RATE の上限（1〜上限のどれも同じ確率）：1回目 99、2回目 79、3回目以降 49
-const medalRange = n => n <= 1 ? 99 : n === 2 ? 79 : 49;
-const drawMedal = n => 1 + Math.floor(Math.random() * medalRange(n));
+// 今週のボーナス観光地では上限を小さくする（2026-11-28 にユーザーが案Aに決定）：1回目 49、2回目 39、3回目以降 29
+const medalRange = (n, bonus) => bonus ? (n <= 1 ? 49 : n === 2 ? 39 : 29) : (n <= 1 ? 99 : n === 2 ? 79 : 49);
+const drawMedal = (n, bonus) => 1 + Math.floor(Math.random() * medalRange(n, bonus));
 const medalsOf = v => (v && Array.isArray(v.medals)) ? v.medals : [];
 const bestMedal = v => { const m = medalsOf(v); return m.length ? Math.min(...m.map(x => x.r)) : null; };
 const medalName = r => `${medalTier(r).label}メダル`;
 // メダルの丸（中に RATE）。size：'' 小さい（一覧）、'big'（詳細・お知らせ）
 const medalBadge = (r, size) => { const t = medalTier(r);
   return `<span class="medal m-${t.key}${size ? ' ' + size : ''}" title="${t.label}メダル RATE ${r}">${r}</span>`; };
+
+// ===== 今週のボーナス観光地（2026-11-28 追加） =====
+// 毎週（月曜0時〜日曜24時、端末の時刻）、観光地が10か所以上ある県から、20か所に1つ（四捨五入・最大5か所）をボーナスにする。
+// 週の日付と観光地の id から計算して決めるので、サーバーなしで友人全員が同じ観光地になる。前の週のボーナスは次の週には選ばない。
+// ボーナスはその週に1回だけ：+150 XP、メダルが出やすい。記録は state.spots[id].bw（ボーナスを受け取った週の月曜日）と bn（受け取った回数）
+const XP_BONUS = 150;
+const BONUS_MIN_SPOTS = 10;   // 観光地がこれより少ない県は対象外（全国枠しかない県で同じ観光地が毎週選ばれないように）
+const BONUS_PER = 20;         // 観光地20か所に1つ
+const BONUS_MAX = 5;          // 1つの県の上限
+const BONUS_HINT_M = 30000;   // この距離以内にボーナス観光地があれば、近くの観光地の案内でそちらを優先する
+const BONUS_EPOCH = '2026-11-23'; // 計算を始める週（月曜日）。「前の週は選ばない」をこの週から順にたどる
+const addDays = (d, n) => { const x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() + n); return x.toLocaleDateString('sv-SE'); };
+const weekOf = d => addDays(d, -((new Date(d + 'T00:00:00').getDay() + 6) % 7)); // その日を含む週の月曜日
+const weekKey = () => weekOf(new Date().toLocaleDateString('sv-SE'));
+// 文字列から決まった数を作る（FNV-1a ＋ かき混ぜ）
+function hash32(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return h >>> 0;
+}
+// ある週のボーナス（exclude は前の週のボーナス）。観光地ごとに週と id から点数を出し、県ごとに点数の小さい順に選ぶ
+// （観光地を追加しても、その観光地が選ばれない限り、ほかのボーナスは変わらない）
+function bonusPick(week, exclude) {
+  const byPref = {};
+  SPOTS.forEach(s => { (byPref[s.pref] = byPref[s.pref] || []).push(s); });
+  const out = new Set();
+  Object.values(byPref).forEach(list => {
+    if (list.length < BONUS_MIN_SPOTS) return;
+    const k = Math.min(BONUS_MAX, Math.max(1, Math.round(list.length / BONUS_PER)));
+    list.filter(s => !exclude.has(s.id)).map(s => ({ id: s.id, h: hash32(week + '|' + s.id) }))
+      .sort((a, b) => a.h - b.h || (a.id < b.id ? -1 : 1)).slice(0, k).forEach(x => out.add(x.id));
+  });
+  return out;
+}
+let bonusCache = { key: '', set: new Set() };
+function bonusFor(week) {
+  const key = week + ':' + SPOTS.length;
+  if (bonusCache.key === key) return bonusCache.set;
+  let set = new Set();
+  if (week < BONUS_EPOCH) set = bonusPick(week, new Set());
+  else for (let w = BONUS_EPOCH; w <= week; w = addDays(w, 7)) set = bonusPick(w, set);
+  bonusCache = { key, set };
+  return set;
+}
+const isBonus = s => !!s && bonusFor(weekKey()).has(s.id);
+const bonusUsed = v => !!v && v.bw === weekKey();       // 今週のボーナスを受け取り済み
+const bonusOpen = s => isBonus(s) && !bonusUsed(state.spots[s.id]); // まだボーナスを受け取れる
+const fmtMD = d => { const [, m, dd] = d.split('-').map(Number); return `${m}/${dd}（${'日月火水木金土'[new Date(d + 'T00:00:00').getDay()]}）`; };
+// 今週の期間と残り（日曜日は「今日まで」）
+function bonusPeriod() {
+  const w = weekKey(), end = addDays(w, 6), left = 7 - ((new Date().getDay() + 6) % 7);
+  return { start: w, end, text: `${fmtMD(w)}〜${fmtMD(end)}`, left: left <= 1 ? '今日まで' : `あと${left}日` };
+}
 
 // ===== 道の駅（spots.json の michi に入っている。観光地を兼ねる道の駅は spot に観光地の id を持つ） =====
 // 観光地を兼ねる道の駅は、観光地としてチェックインする（XPも観光地のまま）。コンプリート一覧では観光地と道の駅の両方に数える
@@ -544,9 +620,10 @@ function legacyLog(s) {
 }
 const LOG_MAX = 500; // 履歴は新しい500件まで残す
 // チェックインを履歴に足す（日時は端末の時刻「YYYY-MM-DD HH:MM:SS」）
-function addLog(type, id, name, pref, xp, medal) {
+function addLog(type, id, name, pref, xp, medal, bonus) {
   const e = { type, id, name, pref: pref || '', at: new Date().toLocaleString('sv-SE'), xp };
   if (medal) e.medal = medal; // 観光地で入手したメダルの RATE
+  if (bonus) e.bonus = true;  // 今週のボーナスを受け取ったチェックイン
   state.log.push(e);
   if (state.log.length > LOG_MAX) state.log.splice(0, state.log.length - LOG_MAX);
 }
@@ -598,9 +675,9 @@ const marker = L.circleMarker([0, 0], { pane: 'me', radius: 8, color: '#fff', we
 const accCircle = L.circle([0, 0], { radius: 0, color: '#1e6f5c', weight: 1, fillOpacity: 0.1 });
 
 // 観光地の印（種類ごとのアイコン。未訪問は紫のふち、訪問済みは黄緑のふち、今日訪問したものは半透明、レア枠は金の枠）
-function spotIcon(s, visited, fav, todayVisited) {
+function spotIcon(s, visited, fav, todayVisited, bonus) {
   return L.divIcon({
-    className: `spot-marker t-${s.type || 'other'}${s.rare ? ' rare' : ''}${visited ? ' visited' : ''}${todayVisited ? ' today' : ''}${fav ? ' fav' : ''}`,
+    className: `spot-marker t-${s.type || 'other'}${s.rare ? ' rare' : ''}${visited ? ' visited' : ''}${todayVisited ? ' today' : ''}${fav ? ' fav' : ''}${bonus ? ' bonus' : ''}`,
     html: `<span>${spotType(s).icon}</span>`,
     iconSize: [30, 30], iconAnchor: [15, 15], tooltipAnchor: [0, -15],
   });
@@ -619,8 +696,9 @@ const spotLayer = L.markerClusterGroup
         const allVisited = ms.every(m => m.visited);
         const rareLeft = ms.some(m => m.rare && !m.visited); // 未訪問のレア枠が入っていたら金の縁
         const size = ms.length < 10 ? 34 : ms.length < 100 ? 40 : 46;
+        const bonusIn = ms.some(m => m.bonus); // 今週のボーナス観光地が入っていたら 🎁
         return L.divIcon({
-          className: 'spot-cluster' + (allVisited ? ' visited' : '') + (rareLeft ? ' rare' : ''),
+          className: 'spot-cluster' + (allVisited ? ' visited' : '') + (rareLeft ? ' rare' : '') + (bonusIn ? ' bonus' : ''),
           html: `<span>${ms.length}</span>`,
           iconSize: [size, size],
         });
@@ -639,7 +717,7 @@ function addSpotMarker(s) {
   m.on('popupopen', e => {
     e.popup.getElement().querySelector('.spot-pop').onclick = () => { m.closePopup(); openSpotDetail(s.id); };
   });
-  m.visited = false; m.fav = false; m.todayVisited = false; m.rare = !!s.rare;
+  m.visited = false; m.fav = false; m.todayVisited = false; m.rare = !!s.rare; m.bonus = false;
   m.on('click', () => { if (demo) setPosition(s.lat, s.lng, 0, true); }); // テストモードではアイコンをタップするとその場所へ
   spotMarkers[s.id] = m;
 }
@@ -1041,6 +1119,19 @@ function nearestSpot() {
   return best;
 }
 
+// 現在地からいちばん近い、まだ受け取っていない今週のボーナス観光地と距離（m）
+function nearestBonus() {
+  if (!current) return null;
+  const here = L.latLng(current.lat, current.lng);
+  let best = null;
+  SPOTS.forEach(s => {
+    if (!bonusOpen(s)) return;
+    const d = here.distanceTo([s.lat, s.lng]);
+    if (!best || d < best.dist) best = { spot: s, dist: d };
+  });
+  return best;
+}
+
 // 観光地にチェックインできない理由（できるなら null）
 function spotBlock(n) {
   if (!n || n.dist > SPOT_RADIUS_M) return '範囲外';
@@ -1054,6 +1145,7 @@ $('spotCheckin').addEventListener('click', () => {
   const n = nearestSpot();
   if (spotBlock(n)) return;
   const s = n.spot, v = state.spots[s.id];
+  const bonus = bonusOpen(s); // 今週のボーナス（その週に1回だけ）
   let gain, title;
   if (!v) {
     gain = s.rare ? XP_RARE_NEW : XP_SPOT_NEW; title = s.rare ? '✨ レアスポット発見！' : '📸 観光地に到着！';
@@ -1063,14 +1155,16 @@ $('spotCheckin').addEventListener('click', () => {
     v.last = today(); v.count++;
   }
   // メダルの抽選（何回目の訪問かで RATE の範囲が変わる。機能を入れる前の訪問も回数には数える）
-  const rec = state.spots[s.id], prevBest = bestMedal(rec), rate = drawMedal(rec.count);
-  (rec.medals = medalsOf(rec)).push({ r: rate, d: today() });
-  addLog('spot', s.id, s.name, s.pref, gain, rate);
+  const rec = state.spots[s.id], prevBest = bestMedal(rec), rate = drawMedal(rec.count, bonus);
+  (rec.medals = medalsOf(rec)).push(bonus ? { r: rate, d: today(), b: 1 } : { r: rate, d: today() });
+  if (bonus) { gain += XP_BONUS; rec.bw = weekKey(); rec.bn = (rec.bn || 0) + 1; }
+  addLog('spot', s.id, s.name, s.pref, gain, rate, bonus);
   const before = levelOf(state.xp);
   state.xp += gain;
   save();
   const after = levelOf(state.xp);
   toast(`${title}<br>${esc(s.name)}<div class="big">+${gain} XP</div>` +
+        (bonus ? `<div class="toast-bonus">🎁 今週のボーナス +${XP_BONUS} XP</div>` : '') +
         `<div class="toast-medal">${medalBadge(rate, 'big')}<div><b>${medalName(rate)}</b>　RATE ${rate}` +
         (prevBest !== null && rate < prevBest ? '<br>🎉 ベスト更新！' : '') + '</div></div>' +
         (after > before ? `<div>⬆ レベルアップ！ Lv${after}</div>` : '') +
@@ -1086,8 +1180,10 @@ function renderSpots() {
   SPOTS.forEach(s => {
     const m = spotMarkers[s.id], v = state.spots[s.id], visited = !!v;
     const fav = !!state.favs[s.id], todayVisited = !!v && v.last === today(); // 日付が変わると次の描画で元に戻る
-    if (m.visited !== visited || m.fav !== fav || m.todayVisited !== todayVisited) {
-      m.setIcon(spotIcon(s, visited, fav, todayVisited)); m.visited = visited; m.fav = fav; m.todayVisited = todayVisited; changed.push(m);
+    const bonus = bonusOpen(s); // 今週のボーナス（受け取ったら普通のアイコンに戻る。週が変わると入れ替わる）
+    if (m.visited !== visited || m.fav !== fav || m.todayVisited !== todayVisited || m.bonus !== bonus) {
+      m.setIcon(spotIcon(s, visited, fav, todayVisited, bonus));
+      m.visited = visited; m.fav = fav; m.todayVisited = todayVisited; m.bonus = bonus; changed.push(m);
     }
   });
   // まとめた丸の色（全部訪問済みなら灰色）も描き直す
@@ -1113,20 +1209,26 @@ function renderSpots() {
     box.hidden = true; hint.textContent = '';
     doneChips.push({ text: `✅ ${spotType(n.spot).icon} ${n.spot.name}`, spot: n.spot.id });
   } else if (n && n.dist <= SPOT_RADIUS_M) {
-    const v = state.spots[n.spot.id], block = spotBlock(n);
+    const v = state.spots[n.spot.id], block = spotBlock(n), bonus = bonusOpen(n.spot);
     box.hidden = false; hint.textContent = '';
     $('spotName').textContent = `${n.spot.rare ? '✨ ' : ''}${spotType(n.spot).icon} ${n.spot.name}`;
-    box.classList.toggle('rare', !!n.spot.rare);
+    box.classList.toggle('rare', !!n.spot.rare && !bonus);
+    box.classList.toggle('bonus', bonus);
     $('spotStatus').innerHTML = v
       ? `<span class="status old">訪問済み ${v.count}回</span>`
       : '<span class="status new">未訪問！</span>';
-    $('spotSub').textContent = `${n.spot.rare ? 'レアスポット・' : ''}${spotType(n.spot).label}・ここから ${fmtDist(n.dist)}`;
+    $('spotSub').innerHTML = (bonus ? `<span class="bonus-tag">🎁 今週のボーナス（${bonusPeriod().left}）</span>` : '') +
+      esc(`${n.spot.rare ? 'レアスポット・' : ''}${spotType(n.spot).label}・ここから ${fmtDist(n.dist)}`);
     $('spotCheckin').disabled = !!block;
-    $('spotCheckin').textContent = block || `観光地チェックイン +${v ? spotRevisitXp(n.spot) : n.spot.rare ? XP_RARE_NEW : XP_SPOT_NEW} XP`;
+    const base = v ? spotRevisitXp(n.spot) : n.spot.rare ? XP_RARE_NEW : XP_SPOT_NEW;
+    $('spotCheckin').textContent = block || `観光地チェックイン +${base + (bonus ? XP_BONUS : 0)} XP`;
   } else {
     box.hidden = true;
-    hint.textContent = n && n.dist <= SPOT_HINT_M
-      ? `🧭 近くの観光地：${spotType(n.spot).icon} ${n.spot.name}（${fmtDist(n.dist)}）` : '';
+    // 30km以内にまだ受け取っていないボーナス観光地があれば、そちらを優先して案内する
+    const b = nearestBonus();
+    hint.textContent = b && b.dist <= BONUS_HINT_M
+      ? `🎁 近くのボーナス観光地：${spotType(b.spot).icon} ${b.spot.name}（${fmtDist(b.dist)}）`
+      : n && n.dist <= SPOT_HINT_M ? `🧭 近くの観光地：${spotType(n.spot).icon} ${n.spot.name}（${fmtDist(n.dist)}）` : '';
   }
 }
 
@@ -1517,12 +1619,38 @@ const VIEWS = {
       const attrs = (e.type === 'spot' || e.type === 'michi') ? `data-spot="${esc(e.id)}"` : e.type === 'station' ? `data-station="${esc(e.id)}"` : '';
       rows.push(item({ mark: icon, attrs, name: esc(e.name) + (e.type === 'station' ? '駅' : ''),
         sub: esc([label, e.pref].filter(Boolean).join('・')),
-        right: (e.at.length > 10 ? e.at.slice(11, 16) : '時刻不明') + (typeof e.xp === 'number' ? `<br>+${e.xp} XP` : '') +
+        right: (e.at.length > 10 ? e.at.slice(11, 16) : '時刻不明') + (typeof e.xp === 'number' ? `<br>${e.bonus ? '🎁 ' : ''}+${e.xp} XP` : '') +
           (e.medal ? `<br>${medalBadge(e.medal)}` : '') }));
     });
     flush();
     if (log.some(e => e.at.length <= 10)) html += '<div class="list-note">※ 履歴の機能を入れる前の訪問は、最後に訪問した日だけを表示しています</div>';
     return { title: '🕒 最近の訪問', html };
+  },
+  // 今週のボーナス観光地（県ごと。現在地が分かれば近い順）
+  bonus() {
+    const bp = bonusPeriod(), set = bonusFor(weekKey());
+    const here = current ? L.latLng(current.lat, current.lng) : null;
+    const list = SPOTS.filter(s => set.has(s.id)).map(s => ({ s, d: here ? here.distanceTo([s.lat, s.lng]) : null }));
+    const prefs = [...new Set(list.map(x => x.s.pref))].sort((a, b) => prefRank(a) - prefRank(b));
+    const done = list.filter(x => bonusUsed(state.spots[x.s.id])).length;
+    let html = `<div class="list-note"><b>${bp.text}</b>（${bp.left}）　受け取り済み ${done} / ${list.length}<br>` +
+      `ボーナスは週に1回：+${XP_BONUS} XP、メダルが出やすくなります（1回目 1〜49・2回目 1〜39・3回目以降 1〜29）。毎週月曜日に入れ替わります。</div>`;
+    if (!list.length) return { title: '🎁 今週のボーナス', html: html + '<div class="empty">観光地データを読み込み中…</div>' };
+    prefs.forEach(p => {
+      const rows = list.filter(x => x.s.pref === p)
+        .sort((a, b) => a.d !== null && b.d !== null ? a.d - b.d : prefRank(a.s.pref) - prefRank(b.s.pref) || (a.s.name < b.s.name ? -1 : 1))
+        .map(({ s, d }) => {
+          const v = state.spots[s.id], used = bonusUsed(v);
+          const base = v ? spotRevisitXp(s) : s.rare ? XP_RARE_NEW : XP_SPOT_NEW;
+          return item({ mark: used ? '✅' : '🎁', todo: used, attrs: `data-spot="${esc(s.id)}"`,
+            name: `${spotType(s).icon} ${esc(s.name)}${s.rare ? ' ✨' : ''}${state.favs[s.id] ? ' <span style="color:#f0b400">★</span>' : ''}${bestBadge(v)}`,
+            sub: esc([spotType(s).label, s.city, d !== null ? fmtDist(d) : ''].filter(Boolean).join('・')),
+            right: used ? '受け取り済み' : `+${base + XP_BONUS} XP<br>${v ? v.count + '回' : '未訪問'}` });
+        });
+      html += `<div class="sec-h">${esc(p)}（${rows.length}）</div>` + items(rows);
+    });
+    html += `<div class="list-note">観光地が${BONUS_MIN_SPOTS}か所以上ある県から、${BONUS_PER}か所に1つ（最大${BONUS_MAX}か所）を選んでいます。友人どうしで同じ観光地になります。</div>`;
+    return { title: '🎁 今週のボーナス', html };
   },
   // 獲得メダル：種類ごとの枚数（入手したメダル全部）と、観光地ごとのベストメダルの一覧（RATE の小さい順）
   // filter = 'all' ／ 'platinum' 'gold' 'silver' 'bronze'（ベストメダルの種類で絞り込む）
@@ -1544,7 +1672,8 @@ const VIEWS = {
       .sort((a, b) => a.best - b.best || medalsOf(b.v).length - medalsOf(a.v).length);
     const rows = shown.map(({ id, v, best }) => { const s = spotById(id), t = spotType(s);
       return item({ mark: medalBadge(best), attrs: `data-spot="${esc(id)}"`, name: `${t.icon} ${esc(s ? s.name : v.name)}${s && s.rare ? ' ✨' : ''}`,
-        sub: esc([`ベスト ${medalName(best)} RATE ${best}`, s ? spotPrefs(s).join('・') : v.pref].filter(Boolean).join('・')),
+        sub: (medalsOf(v).some(m => m.b && m.r === best) ? '🎁 ' : '') +
+          esc([`ベスト ${medalName(best)} RATE ${best}`, s ? spotPrefs(s).join('・') : v.pref].filter(Boolean).join('・')),
         right: `${medalsOf(v).length}枚<br>${v.count}回` }); });
     return { title: '🏅 獲得メダル', html:
       `<div class="medal-sum">${sum}</div>` +
@@ -1565,7 +1694,8 @@ const VIEWS = {
 
 // メダルのしくみの説明（獲得メダルのページの下）
 const medalHelp = () => '<div class="list-note medal-help">🏅 観光地にチェックインするたびにメダルを1枚入手（1日1回）。RATE は 1〜99 で、数字が小さいほどレア。<br>' +
-  'プラチナ 1〜9／金 10〜29／銀 30〜59／銅 60〜99。<br>1回目は 1〜99、2回目は 1〜79、3回目以降は 1〜49 から抽選するので、同じ観光地に何度も行くほどレアなメダルが出やすくなります。</div>';
+  'プラチナ 1〜9／金 10〜29／銀 30〜59／銅 60〜99。<br>1回目は 1〜99、2回目は 1〜79、3回目以降は 1〜49 から抽選するので、同じ観光地に何度も行くほどレアなメダルが出やすくなります。<br>' +
+  '🎁 今週のボーナス観光地では、1回目 1〜49、2回目 1〜39、3回目以降 1〜29 から抽選します（週に1回）。🎁 の付いたメダルはボーナスで入手したものです。</div>';
 
 // 鉄道路線の分類（2026-11-27 にユーザーと決めた）：JR（新幹線・在来線）／私鉄（民営と第三セクター）／その他（ケーブルカーなど）
 const LINE_KINDS = [
@@ -1713,12 +1843,21 @@ function openSpotDetail(id) {
     $('dWh').className = 'detail-wh' + (nature ? ' nature' : '');
     $('dWh').textContent = `${nature ? '🌳 世界自然遺産' : '🏛️ 世界文化遺産'}「${wh.name}」`;
   }
+  // 今週のボーナス（受け取れる／今週はもう受け取った）
+  const bon = !isM && isBonus(s), bp = bonusPeriod();
+  $('dBonus').hidden = !bon;
+  if (bon) {
+    const used = bonusUsed(v);
+    $('dBonus').className = 'detail-bonus' + (used ? ' used' : '');
+    $('dBonus').textContent = used ? `🎁 今週のボーナスは受け取り済み（${bp.text}）`
+      : `🎁 今週のボーナス：+${XP_BONUS} XP・メダルが出やすい（${bp.text}・${bp.left}）`;
+  }
   $('dStatus').textContent = v ? '✅ 訪問済み' : '未訪問';
   $('dFirst').textContent = v ? v.first : '未訪問';
   $('dLast').textContent = v ? v.last : '―';
   $('dCount').textContent = `${v ? v.count : 0}回`;
   $('dXp').textContent = `${isM ? michiXp(v) : spotXp(s, v)} XP`;
-  renderDetailMedal(isM, v);
+  renderDetailMedal(isM, v, s);
   renderFavButton(id);
   // 思い出メモ（訪問済みの観光地だけ書ける）
   detailId = id;
@@ -1760,13 +1899,15 @@ $('dFav').addEventListener('click', () => {
 });
 
 // 詳細カードのメダル欄：ベスト（大きな丸）・入手したメダル（RATE の小さい順）・次の訪問で抽選する範囲
-function renderDetailMedal(isM, v) {
+function renderDetailMedal(isM, v, s) {
   const box = $('dMedal');
   box.hidden = isM;
   if (isM) return;
   const ms = medalsOf(v).slice().sort((a, b) => a.r - b.r);
-  const next = medalRange((v ? v.count : 0) + 1);
-  const nextText = `次のチェックインは RATE 1〜${next} から抽選${v && v.last === today() ? '（明日から）' : ''}`;
+  // 今週のボーナスを受け取れるなら、出やすい範囲で表示する（今日もう行った場合は、明日もボーナスのままなら同じ）
+  const bonus = s && bonusOpen(s);
+  const next = medalRange((v ? v.count : 0) + 1, bonus);
+  const nextText = `次のチェックインは RATE 1〜${next} から抽選${bonus ? '（🎁 ボーナス）' : ''}${v && v.last === today() ? '（明日から）' : ''}`;
   if (!ms.length) {
     box.innerHTML = '<div class="dm-head">🏅 メダル</div><div class="dm-none">' +
       (v ? 'まだありません（メダル機能を入れる前の訪問のため）' : 'チェックインするとメダルを1枚入手できます') +
@@ -1778,12 +1919,13 @@ function renderDetailMedal(isM, v) {
     `<div class="dm-best">${medalBadge(best, 'big')}<div><div class="dm-best-name">ベスト：${medalName(best)}</div>` +
     `<div class="dm-best-rate">RATE ${best}</div></div></div>` +
     `<div class="dm-count">全${ms.length}枚（${cnt.map(([t, n]) => `${t.label}${n}`).join('・')}）</div>` +
-    `<div class="dm-list">${ms.map(m => medalBadge(m.r)).join('')}</div>` +
+    `<div class="dm-list">${ms.map(m => m.b ? `<span class="dm-b" title="今週のボーナスで入手">${medalBadge(m.r)}<i>🎁</i></span>` : medalBadge(m.r)).join('')}</div>` +
+    (ms.some(m => m.b) ? '<div class="dm-next">🎁＝今週のボーナスで入手したメダル</div>' : '') +
     `<div class="dm-next">${nextText}</div>`;
 }
 
 // この観光地・道の駅でこれまでに得たXP（初訪問 + 再訪の回数分）
-const spotXp = (s, v) => v ? (s && s.rare ? XP_RARE_NEW : XP_SPOT_NEW) + (v.count - 1) * spotRevisitXp(s) : 0;
+const spotXp = (s, v) => v ? (s && s.rare ? XP_RARE_NEW : XP_SPOT_NEW) + (v.count - 1) * spotRevisitXp(s) + (v.bn || 0) * XP_BONUS : 0;
 const michiXp = v => v ? XP_MICHI_NEW + (v.count - 1) * XP_MICHI_REVISIT : 0;
 
 // 思い出メモは入力するたびに少し待って自動保存する
@@ -1943,9 +2085,13 @@ function parseBackup(text) {
       if (typeof v.memo === 'string' && v.memo) spots[id].memo = v.memo.slice(0, 500);
       // メダル（メダル機能より前のファイルには無い）。RATE が 1〜99 の整数のものだけ残す
       if (Array.isArray(v.medals)) {
-        const ms = v.medals.filter(m => m && Number.isInteger(m.r) && m.r >= 1 && m.r <= 99 && typeof m.d === 'string').map(m => ({ r: m.r, d: m.d }));
+        const ms = v.medals.filter(m => m && Number.isInteger(m.r) && m.r >= 1 && m.r <= 99 && typeof m.d === 'string')
+          .map(m => m.b ? { r: m.r, d: m.d, b: 1 } : { r: m.r, d: m.d });
         if (ms.length) spots[id].medals = ms;
       }
+      // 今週のボーナス（受け取った週の月曜日と、受け取った回数）
+      if (typeof v.bw === 'string') spots[id].bw = v.bw;
+      if (Number.isInteger(v.bn) && v.bn > 0) spots[id].bn = v.bn;
     }
   }
   // 駅の記録（駅機能より前に保存したファイルには無い）
@@ -1981,7 +2127,8 @@ function parseBackup(text) {
     ? j.log.filter(e => e && ['muni', 'spot', 'station', 'michi'].includes(e.type) && typeof e.id === 'string' &&
         typeof e.name === 'string' && typeof e.at === 'string').slice(-LOG_MAX)
         .map(e => Object.assign({ type: e.type, id: e.id, name: e.name, pref: typeof e.pref === 'string' ? e.pref : '', at: e.at,
-          xp: typeof e.xp === 'number' ? e.xp : undefined }, Number.isInteger(e.medal) && e.medal >= 1 && e.medal <= 99 ? { medal: e.medal } : {}))
+          xp: typeof e.xp === 'number' ? e.xp : undefined }, Number.isInteger(e.medal) && e.medal >= 1 && e.medal <= 99 ? { medal: e.medal } : {},
+          e.bonus === true ? { bonus: true } : {}))
     : legacyLog(s);
   return s;
 }
