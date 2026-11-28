@@ -458,7 +458,9 @@ const SPOT_DESC = {};   // id → 説明
 const spotIndex = {};   // id → 観光地
 const spotById = id => spotIndex[id];
 const spotPrefs = s => (s && (s.prefs || [s.pref])) || [];
-const XP_RARE_NEW = 150; // レア枠の観光地の初訪問（再訪は通常と同じ XP_SPOT_REVISIT）
+const XP_RARE_NEW = 150; // レア枠の観光地の初訪問
+const XP_RARE_REVISIT = 50; // レア枠の観光地の再訪（1日1回。2026-11-28 に 20 → 50）
+const spotRevisitXp = s => s && s.rare ? XP_RARE_REVISIT : XP_SPOT_REVISIT;
 
 // ===== メダル（観光地のチェックインごとに1枚。RATE 1〜99 で、数字が小さいほどレア。レアスポットも同じ） =====
 // 記録は state.spots[id].medals = [{ r: RATE, d: 'YYYY-MM-DD' }, …]（入手したメダルを全部残す。表示はベスト＝一番小さい RATE）
@@ -1057,7 +1059,7 @@ $('spotCheckin').addEventListener('click', () => {
     gain = s.rare ? XP_RARE_NEW : XP_SPOT_NEW; title = s.rare ? '✨ レアスポット発見！' : '📸 観光地に到着！';
     state.spots[s.id] = { name: s.name, pref: s.pref, city: s.city || '', first: today(), last: today(), count: 1 };
   } else {
-    gain = XP_SPOT_REVISIT; title = 'また来ました';
+    gain = spotRevisitXp(s); title = 'また来ました';
     v.last = today(); v.count++;
   }
   // メダルの抽選（何回目の訪問かで RATE の範囲が変わる。機能を入れる前の訪問も回数には数える）
@@ -1120,7 +1122,7 @@ function renderSpots() {
       : '<span class="status new">未訪問！</span>';
     $('spotSub').textContent = `${n.spot.rare ? 'レアスポット・' : ''}${spotType(n.spot).label}・ここから ${fmtDist(n.dist)}`;
     $('spotCheckin').disabled = !!block;
-    $('spotCheckin').textContent = block || `観光地チェックイン +${v ? XP_SPOT_REVISIT : n.spot.rare ? XP_RARE_NEW : XP_SPOT_NEW} XP`;
+    $('spotCheckin').textContent = block || `観光地チェックイン +${v ? spotRevisitXp(n.spot) : n.spot.rare ? XP_RARE_NEW : XP_SPOT_NEW} XP`;
   } else {
     box.hidden = true;
     hint.textContent = n && n.dist <= SPOT_HINT_M
@@ -1781,7 +1783,7 @@ function renderDetailMedal(isM, v) {
 }
 
 // この観光地・道の駅でこれまでに得たXP（初訪問 + 再訪の回数分）
-const spotXp = (s, v) => v ? (s && s.rare ? XP_RARE_NEW : XP_SPOT_NEW) + (v.count - 1) * XP_SPOT_REVISIT : 0;
+const spotXp = (s, v) => v ? (s && s.rare ? XP_RARE_NEW : XP_SPOT_NEW) + (v.count - 1) * spotRevisitXp(s) : 0;
 const michiXp = v => v ? XP_MICHI_NEW + (v.count - 1) * XP_MICHI_REVISIT : 0;
 
 // 思い出メモは入力するたびに少し待って自動保存する
