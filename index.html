@@ -874,6 +874,13 @@ function startWatch() {
   );
 }
 function stopWatch() { if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; } }
+// 現在地を「不明」に戻す（テストモードの終了時。テスト地点のままだと、GPSが取れない場所でそこにいる扱いのままチェックインできてしまうため）
+function clearPosition() {
+  current = null; lastLookup = null; firstFix = true;
+  lookupSeq++; lookupPending = false; clearTimeout(retryTimer); failCount = 0; // 調べている途中のテスト地点の結果は捨てる
+  clearTimeout(stillTimer); fixes = [];
+  marker.remove(); accCircle.remove();
+}
 
 // ===== 移動の速さ（電車で通過しただけのチェックインを防ぐ） =====
 let fixes = [];          // 最近の位置 { lat, lng, t }
@@ -1840,6 +1847,9 @@ function render() {
     if (lookupPending) showPlace('市町村を調べています…', '');
     else showPlace('市町村が判定できません', '海上・通信エラーなど（自動で再試行します）');
     btn.hidden = false; btn.disabled = true; btn.textContent = 'チェックイン';
+  } else {
+    showPlace('現在地を取得中…', '');
+    btn.hidden = false; btn.disabled = true; btn.textContent = 'チェックイン';
   }
 
   doneChips = [];
@@ -1991,6 +2001,7 @@ function toggleDemo() {
   if (demo) { realState = state; state = JSON.parse(JSON.stringify(state)); }
   else { state = realState; realState = null; }
   fixes = []; // テストの前後で速度の計算が混ざらないように
+  if (!demo) clearPosition(); // テスト地点にいる扱いのままにしない（GPSが取れるまで現在地は不明）
   listDirty = true;
   render();
   document.body.classList.toggle('demo', demo);
